@@ -137,6 +137,7 @@ class graph_summary:
         if cost_u is 0 or cost_v is 0:
             return 0
         cost_w = 0
+        print "test"
         num_nodes_in_w = len(summary.vs[u]['contains']) + len(summary.vs[v]['contains'])
         super_neighbors = self.get_shared_neighbors(summary, u, v)
 
