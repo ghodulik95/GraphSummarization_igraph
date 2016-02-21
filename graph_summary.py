@@ -23,14 +23,21 @@ class graph_summary:
             graph, node_to_supernode = self.get_graph_from_SQLDB()
         else:
             graph, node_to_supernode = self.get_graph_from_file()
+
+        graph.vs['original_id'] = [i for i in range(graph.vcount())]
+        self.next_new_id = graph.vcount()
         if not self.include_attributes:
             attribute_nodes = graph.vs.select(_degree_gt = 75)
             graph.delete_vertices(attribute_nodes)
         return graph, node_to_supernode
 
+    def get_next_new_id(self):
+        self.next_new_id += 1
+        return self.next_new_id
 
     def get_graph_from_file(self):
         node_to_supernode = {}
+        supernode_to_node = {}
         edges = set()
         max_node_id = -1
         count = 0
@@ -47,18 +54,20 @@ class graph_summary:
                 if not node_to_supernode.has_key(subject_name):
                     max_node_id += 1
                     node_to_supernode[subject_name] = max_node_id
+                    supernode_to_node[max_node_id] = subject_name
                 if not node_to_supernode.has_key(object_name):
                     max_node_id += 1
                     node_to_supernode[object_name] = max_node_id
+                    supernode_to_node[max_node_id] = object_name
                 edges.add((node_to_supernode[subject_name], node_to_supernode[object_name]))
                 count += 1
                 if count >= 50:
                     break
 
         g = ig.Graph(directed=self.directed)
-        g.add_vertices(range(0, max_node_id + 1))
+        g.add_vertices(max_node_id + 1)
         g.add_edges(edges)
-        return g, node_to_supernode
+        return g, node_to_supernode, supernode_to_node
 
 
 
@@ -68,6 +77,7 @@ class graph_summary:
         cursor.execute("SELECT * FROM RDF")
 
         node_to_supernode = {}
+        supernode_to_node = {}
         edges = set()
         max_node_id = -1
         count = 0
@@ -86,17 +96,19 @@ class graph_summary:
             if not node_to_supernode.has_key(subject_name):
                 max_node_id += 1
                 node_to_supernode[subject_name] = max_node_id
+                supernode_to_node[max_node_id] = subject_name
             if not node_to_supernode.has_key(object_name):
                 max_node_id += 1
                 node_to_supernode[object_name] = max_node_id
+                supernode_to_node[max_node_id] = object_name
             edges.add((node_to_supernode[subject_name], node_to_supernode[object_name]))
 
         cnxn.close()
 
         g = ig.Graph(directed=self.directed)
-        g.add_vertices(range(0, max_node_id + 1))
+        g.add_vertices(max_node_id + 1)
         g.add_edges(edges)
-        return g, node_to_supernode
+        return g, node_to_supernode, supernode_to_node
 
     def get_initial_cost(self,node):
         return self.g.vs[node].degree()
@@ -104,31 +116,38 @@ class graph_summary:
     def get_summarization(self):
         if self.g is None:
             return None
-        summary, node_to_supernode = self.get_graph_from_RDFDB()
+        summary, nodename_to_supernode, _ = self.get_graph_from_RDFDB()
+        node_to_supernode = {}
+        for i in range(self.g.vcount):
+            node_to_supernode[i] = i
         print "Summary generated"
         for node in range(0,summary.vcount()):
             summary.vs[node]['cost'] = self.get_initial_cost(node)
             summary.vs[node]['contains'] = {node}
         print "Summary annotated"
-        #return summary
         h = []
         count = 0
         for u in range(0,summary.vcount()):
             two_hop_neighbors = self.get_two_hop_neighbors(summary, u)
 
             for v in two_hop_neighbors:
-                suv = self.calcSUV(summary,u,v)
-                #print suv
+                suv, cost_w = self.calcSUV(summary,u,v)
                 if suv > 0:
-                    heapq.heappush(h, (-suv, (u, v)))
+                    heapq.heappush(h, (-suv, (u, v, cost_w)))
             count += 1
-            #if count % 10 == 0:
-            #print count
             if count % 1000 == 0:
-                print count
+                break
         i = 0
         while len(h) > 0 and i < 100:
-            print h.pop()
+            _, (u,v, cost_w) = heapq.heappop(h)
+            u = summary.vs.select(original_id = u)
+            v = summary.vs.select(original_id = v)
+            summary.add_vertices(1)
+            summary.vs[summary.vcount() - 1]['original_id'] = self.get_next_new_id()
+            summary.vs[summary.vcount() - 1]['contains'] = summary.vs[u]['contains'].union(summary.vs[v]['contains'])
+            summary.vs[summary.vcount() - 1]['cost'] = cost_w
+            summary.delete_vertices([u,v])
+            i += 1
         return summary
 
     def calcSUV(self,summary,u,v):
@@ -137,7 +156,6 @@ class graph_summary:
         if cost_u is 0 or cost_v is 0:
             return 0
         cost_w = 0
-        print "test"
         num_nodes_in_w = len(summary.vs[u]['contains']) + len(summary.vs[v]['contains'])
         super_neighbors = self.get_shared_neighbors(summary, u, v)
 
@@ -153,7 +171,7 @@ class graph_summary:
             else:
                 cost_w += A_wn
 
-        return float(cost_u + cost_v - cost_w) / float(cost_u + cost_v)
+        return float(cost_u + cost_v - cost_w) / float(cost_u + cost_v), cost_w
 
 
     def get_shared_neighbors(self, graph, u, v):
@@ -166,7 +184,7 @@ class graph_summary:
             return graph.neighborhood(vertices = node, order = 2, mode="all")
 
     def generate_summary(self):
-        self.g, self.node_name_to_id = self.get_graph_from_RDFDB()
+        self.g, self.node_name_to_id, self.id_to_node_name = self.get_graph_from_RDFDB()
         print "Graph generated"
         self.s = self.get_summarization()
 
