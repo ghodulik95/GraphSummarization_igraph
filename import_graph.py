@@ -53,7 +53,7 @@ class Graph_importer:
                     id_to_node_name[max_node_id] = object_name
                 edges.add((node_name_to_id[subject_name], node_name_to_id[object_name]))
                 count += 1
-                if count >= 50:
+                if count >= 5000:
                     break
 
         g = ig.Graph(directed=self.directed)
@@ -94,6 +94,9 @@ class Graph_importer:
                 node_name_to_id[object_name] = max_node_id
                 id_to_node_name[max_node_id] = object_name
             edges.add((node_name_to_id[subject_name], node_name_to_id[object_name]))
+            if count > 10000:
+                break
+
 
         cnxn.close()
 
@@ -103,8 +106,8 @@ class Graph_importer:
         return g,id_to_node_name
 
 def can_skip(s,p,o):
-    if '#' in s:
-        return True
+    #if '#' in s:
+    #    return True
     return False
 
 
