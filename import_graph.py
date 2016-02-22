@@ -94,7 +94,7 @@ class Graph_importer:
                 node_name_to_id[object_name] = max_node_id
                 id_to_node_name[max_node_id] = object_name
             edges.add((node_name_to_id[subject_name], node_name_to_id[object_name]))
-            if count > 10000:
+            if count > 5000:
                 break
 
 

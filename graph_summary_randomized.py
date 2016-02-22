@@ -1,9 +1,8 @@
-from import_graph import Graph_importer
+import import_graph
 import igraph as ig
 import random
 
-class graph_summary_randomized:
-
+class Graph_Summary:
     def __init__(self, directed, include_edges, include_attributes, edges_annotated, dbname, sql_database = True, wa=1, wc = 1, we = 1 ):
         self.directed = directed
         self.include_edges = include_edges
@@ -14,166 +13,226 @@ class graph_summary_randomized:
         self.we = we
         self.dbname = dbname
         self.sql_database = sql_database
+        graph_importer = import_graph.Graph_importer(self)
+        self.g, self.original_id_to_name = graph_importer.get_graph_from_RDFDB()
+        del graph_importer
+
+        self.original_id_to_supernode = {}
+        for i in range(self.g.vcount()):
+            self.original_id_to_supernode[i] = i
+        self.s = self.make_blank_summary()
+        self.additions = {}
+        self.subtractions = {}
+        self.max_original_id = self.g.vcount()
+
         self.generate_summary()
+        self.g = None
 
-    def get_initial_cost(self,node):
-        return self.g.vs[node].degree()
+    #Returns a copy of self.g with no edges
+    def make_blank_summary(self):
+        graph = ig.Graph(directed=self.directed)
+        graph.add_vertices(self.g.vcount())
+        return graph
 
-    def get_summarization(self):
-        if self.g is None:
-            return None
-        summary = ig.Graph(directed=self.directed)
-        summary.add_vertices(self.g.vcount())
+    #Returns true if the summary has finished generating
+    def summary_is_generated(self):
+        return self.g is None
 
-        print "Summary generated"
-        node_to_original_id_supernode = {}
-        for node in range(0,summary.vcount()):
-            summary.vs[node]['cost'] = self.get_initial_cost(node)
-            summary.vs[node]['contains'] = set([node])
-            summary.vs[node]['original_id'] = node
-            node_to_original_id_supernode[node] = node
-        unfinished = set(summary.vs['original_id'])
-        next_new_id = summary.vcount()
-        finished = set()
-        print "Summary annotated"
+    def annotate_summary(self):
+        if self.s.ecount() == 0:
+            for i in range(0,self.s.vcount()):
+                self.s.vs[i]['cost'] = self.get_initial_cost_of_node(i)
+                self.s.vs[i]['contains'] = {i}
+                self.s.vs[i]['original_id'] = i
+
+    def get_initial_cost_of_node(self,node_index):
+        return self.g.vs[node_index].degree()
+
+    def get_node_with_original_id(self, original_id):
+        return self.s.vs.select(original_id = original_id)
+
+    def get_vertices_with_original_n_hop_connection(self, super_node,n):
+        seed_nodes = super_node['contains']
+        original_two_hop_neighbors = set()
+        neighborhoods = self.g.neighborhood(vertices=seed_nodes,order=n,mode="all")
+        #print neighborhoods
+        for neighborhood in neighborhoods:
+            for neighbor in neighborhood:
+                original_two_hop_neighbors.add(neighbor)
+        return self.original_nodes_to_supernodes(original_two_hop_neighbors)
+
+    def original_nodes_to_supernodes(self,original_nodes):
+        supernode_original_ids = set(map(lambda x : self.original_id_to_supernode[x], list(original_nodes)))
+        super_node_indexes = set()
+        for neighbor in self.s.vs.select(original_id_in = supernode_original_ids):
+            super_node_indexes.add(neighbor.index)
+        super_node_neighbors = set()
+        for i in super_node_indexes:
+            super_node_neighbors.add(self.s.vs[i])
+        return super_node_neighbors
+
+    def get_number_of_connections_in_original(self,original_nodes,neighbor):
         count = 0
+        for node in original_nodes:
+            for in_neighbor in neighbor['contains']:
+                if self.g.are_connected(node, in_neighbor):
+                    count += 1
+        return count
 
-        #import pdb
-        #pdb.set_trace()
-        while len(unfinished) > 0:
-            u_original_id = random.sample(unfinished, 1)[0]
-            u = summary.vs.find(original_id = u_original_id)
-            u = u.index
-            two_hop_neighbors = self.get_two_hop_neighbors(summary, u, node_to_original_id_supernode)
-            v_best = None
-            suv_best = 0
-            cost_w_best = None
-            for v_index in two_hop_neighbors:
-                if v_index == u:
-                    continue
-                suv, cost_w = self.calcSUV(summary, u, v_index, node_to_original_id_supernode)
-                if suv > suv_best:
-                    v_best = v_index
-                    suv_best = suv
-                    cost_w_best = cost_w
-            if suv_best > 0:
-                print "MERGE: "+str(len(unfinished))
-                summary.add_vertices(1)
-                summary.vs[summary.vcount() - 1]['original_id'] = next_new_id
-                contains_nodes = summary.vs[u]['contains'].union(summary.vs[v_index]['contains'])
-                summary.vs[summary.vcount() - 1]['contains'] = contains_nodes
-                summary.vs[summary.vcount() - 1]['cost'] = cost_w_best
-                v_original_id = summary.vs[v_best]['original_id']
-                if u_original_id in unfinished:
-                    unfinished.remove(u_original_id)
-                if v_original_id in unfinished:
-                    unfinished.remove(v_original_id)
-                unfinished.add(next_new_id)
-                summary.delete_vertices([u,v_best])
-                self.update_node_to_supernode(node_to_original_id_supernode, contains_nodes, next_new_id)
-                next_new_id += 1
-            else:
-                unfinished.remove(u_original_id)
-                finished.add(u_original_id)
-            count += 1
-            if count % 10 == 0:
-                print len(unfinished)
-        additions = subtractions = set()
-        for u in summary.vs:
-            u_index = u.index
-            potential_neighbors = self.get_potential_neighbors(summary,u)
-            for v_index in potential_neighbors:
-                A_uv = self.calc_num_connections_in_original_graph(summary,u_index,v_index)
-                pi_uv = len(summary.vs[u_index]['contains']) * len(summary.vs[v_index]['contains'])
-                #print u['contains']
-                #print str(A_uv)+" "+str(pi_uv)
-                if A_uv > (pi_uv + 1)/2:
-                    summary.add_edge(u,v_index)
+    def get_potential_number_of_connections_in_original(self,original_nodes,neighbor):
+        return len(original_nodes)*len(neighbor['contains'])
 
-        return summary, additions, subtractions
-
-    def update_node_to_supernode(self,node_to_original_id_supernode, contains_nodes, next_new_id):
-        for n in contains_nodes:
-            node_to_original_id_supernode[n] = next_new_id
-
-    def get_potential_neighbors(self,summary,node):
-        potential_neighbors = set()
-        for n in node['contains']:
-            neighbors = self.g.neighborhood(vertices=n,order=1,mode="all")
-            for neighbor in neighbors:
-                potential_neighbors.add(neighbor)
-        return potential_neighbors
-
-    def calc_num_connections_in_original_graph(self,summary,u,v):
-        A_wn = 0
-        for u_contains in summary.vs[u]['contains']:
-            for v_contains in summary.vs[v]['contains']:
-                if self.g.are_connected(u_contains,v_contains):
-                    A_wn += 1
-        return A_wn
-
-    def calcSUV(self,summary,u,v, node_to_supernode):
-        cost_u = summary.vs[u]['cost']
-        cost_v = summary.vs[v]['cost']
-        if cost_u is 0 or cost_v is 0:
+    #Calculates s(u,v) of supernodes u and v
+    def calc_suv(self,u,v):
+        if u['cost'] < 0 or v['cost'] < 0:
+            print "NEGATIVE"
+        if u['cost'] == 0 or v['cost'] == 0:
             return 0, None
-        cost_w = 0
-        num_nodes_in_w = len(summary.vs[u]['contains']) + len(summary.vs[v]['contains'])
-        super_neighbors = self.get_shared_neighbors(summary, u, v, node_to_supernode)
 
-        for super_n in super_neighbors:
-            A_wn = 0
-            for n in summary.vs[super_n]['contains']:
-                for u_node in summary.vs[u]['contains']:
-                    if self.g.are_connected(n,u_node):
-                        A_wn += 1
-            pi_wn = num_nodes_in_w * len(summary.vs[super_n]['contains'])
+        u_neighbors = self.get_vertices_with_original_n_hop_connection(u,1)
+        v_neighbors = self.get_vertices_with_original_n_hop_connection(v,1)
+
+        super_neighbors = u_neighbors.union(v_neighbors)
+
+        #W is u merged with v
+        cost_w = 0
+        for sn in super_neighbors:
+            original_nodes_in_w = u['contains'].union(v['contains'])
+            pi_wn = self.get_potential_number_of_connections_in_original(original_nodes_in_w,sn)
+            A_wn = self.get_number_of_connections_in_original(original_nodes_in_w,sn)
+
+            if pi_wn < A_wn:
+                print "Actual more than potential"
+
             if pi_wn - A_wn + 1 < A_wn:
                 cost_w += pi_wn - A_wn + 1
             else:
                 cost_w += A_wn
 
-        return float(cost_u + cost_v - cost_w) / float(cost_u + cost_v), cost_w
+        return float(u['cost'] + v['cost'] - cost_w) / float(u['cost'] + v['cost']), cost_w
 
+    def pick_random_supernode_in_set(self, s):
+        #Two methods :
+        # A) Pick a random value in s, find the assosciated supernode, and return that
+        #           This method requres linear search across summary. --> expect runtime ~ |Vs| / 2
+        # B) Pick a random supernode, return it if it is in s, otherwise keep picking
+        #           This method will be much faster unless |s| << |Vs|, in which case it could be very sub-optimal
+        #   So, we will attempt B num_attempts_cutoff times. Potentially some analysis can tell us what the optimal cutoff is
 
-    def get_shared_neighbors(self, summary, u, v, node_to_supernode):
-        if not self.directed:
-            neighborhoods = self.g.neighborhood(vertices = summary.vs[u]['contains'].union(summary.vs[v]['contains']), order = 1, mode = "all")
-            shared_neighbors = []
-            for neighborhood in neighborhoods:
-                for n in neighborhood:
-                    shared_neighbors.append(node_to_supernode[n])
-                    print node_to_supernode[n]
+        if len(s) > 2:
+            num_attempts = 0
+            cutoff = self.s.vcount() / 2
+            while num_attempts < cutoff:
+                rand_index = random.randint(0, self.s.vcount() - 1)
+                rand_supernode = self.s.vs[rand_index]
+                if rand_supernode['original_id'] in s:
+                    return rand_supernode
+                num_attempts += 1
+        rand_original_id = random.sample(s,1)[0]
+        return self.s.vs.find(original_id = rand_original_id)
 
-            return set(map(lambda x: summary.vs.find(original_id=x).index, shared_neighbors))
+    def merge_supernodes(self,u,v,cost):
+        self.s.add_vertices(1)
+        new_index = self.s.vcount() - 1
+        new_original_id = self.max_original_id
+        self.s.vs[new_index]['cost'] = cost
+        self.s.vs[new_index]['contains'] = u['contains'].union(v['contains'])
+        self.s.vs[new_index]['original_id'] = new_original_id
+        self.max_original_id += 1
+        self.update_original_id_to_supernode(u,v,new_original_id)
+        self.s.delete_vertices([u,v])
+        return new_original_id
 
-    def get_two_hop_neighbors(self,summary,node, node_to_supernode):
-        if not self.directed:
-            two_hop_neighbors = []
-            neighborhoods = self.g.neighborhood(vertices = summary.vs[node]['contains'], order = 2, mode="all")
-            for neighborhood in neighborhoods:
-                for n in neighborhood:
-                    two_hop_neighbors.append(n)
+    def update_original_id_to_supernode(self,u,v,new_original_id):
+        self.assign_new_supernode(u,new_original_id)
+        self.assign_new_supernode(v,new_original_id)
 
-            return set(map(lambda x: summary.vs.find(original_id=node_to_supernode[x]).index, two_hop_neighbors))
-        return None
+    def assign_new_supernode(self,node,new_supernode_original_id):
+        for id in node['contains']:
+            self.original_id_to_supernode[id] = new_supernode_original_id
 
     def generate_summary(self):
-        graph_importer = Graph_importer(self)
-        self.g, self.id_to_node_name = graph_importer.get_graph_from_RDFDB()
-        print "Graph generated"
-        self.s, self.additions, self.subtractions = self.get_summarization()
+        self.annotate_summary()
+        #print self.s.vs[3489]
+        #return
+        unfinished = set(self.s.vs['original_id'])
+        removed = set()
+        print "Beginning"
+        while len(unfinished) > 0:
+            u = self.pick_random_supernode_in_set(unfinished)
+            two_hop_neighbors = self.get_vertices_with_original_n_hop_connection(u,2)
 
-def can_skip(s,p,o):
-    if '#' in s:
-        return True
-    return False
+            v_best = None
+            suv_best = 0
+            cost_w_best = None
+            for v in two_hop_neighbors:
+                if v.index != u.index:
+                    suv, cost_w = self.calc_suv(u,v)
+                    if suv > suv_best:
+                        suv_best = suv
+                        v_best = v
+                        cost_w_best = cost_w
+            #print suv_best
+            if suv_best > 0:
+                #print u['original_id']
+                unfinished.remove(u['original_id'])
+                #print v_best['original_id']
+                unfinished.remove(v_best['original_id'])
+                if u['original_id'] in removed:
+                    print "U IN REMOVED"
+                if v_best['original_id'] in removed:
+                    print "V IN REMOVED"
+                removed.add(u['original_id'])
+                removed.add(v_best['original_id'])
+                new_node_original_id = self.merge_supernodes(u,v_best,cost_w_best)
+                unfinished.add(new_node_original_id)
+            else:
+                unfinished.remove(u['original_id'])
+            print len(unfinished)
+
+        nodes_tried = set()
+        for u in self.s.vs:
+            nodes_in_u = u['contains']
+            potential_neighbors = self.get_vertices_with_original_n_hop_connection(u,1)
+            for v in potential_neighbors:
+                if v not in nodes_tried:
+                    pi_uv = self.get_potential_number_of_connections_in_original(nodes_in_u,v)
+                    A_uv = self.get_number_of_connections_in_original(nodes_in_u,v)
+                    if A_uv > (pi_uv + 1)/2:
+                        self.s.add_edge(u,v)
+                        self.add_subtractions(u,v)
+                    else:
+                        self.add_additions(u,v)
+            nodes_tried.add(u)
+
+    def add_subtractions(self,u,v):
+        for in_u in u['contains']:
+            for in_v in v['contains']:
+                if not self.g.are_connected(in_u,in_v):
+                    self.add_correction(u,v,self.subtractions)
+
+    def add_additions(self,u,v):
+        for in_u in u['contains']:
+            for in_v in v['contains']:
+                if self.g.are_connected(in_u,in_v):
+                    self.add_correction(u,v,self.additions)
+
+    def add_correction(self,u,v,correction_dict):
+        self.add_correction_with_direction(u,v,correction_dict)
+        self.add_correction_with_direction(v,u,correction_dict)
+
+    def add_correction_with_direction(self,u,v,correction_dict):
+        if not correction_dict.has_key(u):
+            correction_dict[u.index] = set()
+        correction_dict[u.index].add(v.index)
 
 if __name__ == "__main__":
     #g = graph_summary_randomized(False,True,False,False,"out.rdf",False)
-    g = graph_summary_randomized(False,True,False,False,"LUBMOld")
-    print g.s.vcount()
-    print g.g.vcount()
+    g = Graph_Summary(False,True,False,False,"LUBMOld")
+    print g.additions
+    print g.subtractions
+    #print g.s.vcount()
+    #print g.s.vs['contains']
     layout = g.s.layout("kk")
     ig.plot(g.s, layout=layout)
 
