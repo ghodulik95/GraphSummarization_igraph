@@ -2,7 +2,7 @@ import pyodbc as odbc
 import igraph as ig
 import heapq
 
-class graph_summary:
+class graph_summary_greedy:
 
     def __init__(self, directed, include_edges, include_attributes, edges_annotated, dbname, sql_database = True, wa=1, wc = 1, we = 1 ):
         self.directed = directed
