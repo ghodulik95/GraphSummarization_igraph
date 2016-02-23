@@ -1,6 +1,7 @@
 import import_graph
 import igraph as ig
 import random
+import time
 
 class Graph_Summary:
     def __init__(self, directed, include_edges, include_attributes, edges_annotated, dbname, sql_database = True, wa=1, wc = 1, we = 1 ):
@@ -26,7 +27,7 @@ class Graph_Summary:
         self.max_original_id = self.g.vcount()
 
         self.generate_summary()
-        self.g = None
+        #self.g = None
 
     #Returns a copy of self.g with no edges
     def make_blank_summary(self):
@@ -70,6 +71,17 @@ class Graph_Summary:
         for i in super_node_indexes:
             super_node_neighbors.add(self.s.vs[i])
         return super_node_neighbors
+
+    def get_number_of_connections_between_supernodes(self,u,v):
+        return self.get_number_of_connections_in_original(u['contains'], v)
+
+    def get_support_of_edge_between_supernodes(self,u_index,v_index):
+        u = self.s.vs[u_index]
+        v = self.s.vs[v_index]
+        potential = len(u['contains']) * len(v['contains'])
+        assert potential != 0
+        actual = self.get_number_of_connections_in_original(u['contains'], v)
+        return float(actual) / float(potential)
 
     def get_number_of_connections_in_original(self,original_nodes,neighbor):
         count = 0
@@ -158,6 +170,8 @@ class Graph_Summary:
         unfinished = set(self.s.vs['original_id'])
         removed = set()
         print "Beginning"
+        start = time.time()
+        count = 0
         while len(unfinished) > 0:
             u = self.pick_random_supernode_in_set(unfinished)
             two_hop_neighbors = self.get_vertices_with_original_n_hop_connection(u,2)
@@ -188,7 +202,10 @@ class Graph_Summary:
                 unfinished.add(new_node_original_id)
             else:
                 unfinished.remove(u['original_id'])
-            print len(unfinished)
+            count += 1
+            if count % 50 == 0:
+                now = time.time()
+                print "%d iterations done, %d seconds elapsed" % (count, (now - start))
 
         nodes_tried = set()
         for u in self.s.vs:
@@ -209,13 +226,13 @@ class Graph_Summary:
         for in_u in u['contains']:
             for in_v in v['contains']:
                 if not self.g.are_connected(in_u,in_v):
-                    self.add_correction(u,v,self.subtractions)
+                    self.add_correction(in_u,in_v,self.subtractions)
 
     def add_additions(self,u,v):
         for in_u in u['contains']:
             for in_v in v['contains']:
                 if self.g.are_connected(in_u,in_v):
-                    self.add_correction(u,v,self.additions)
+                    self.add_correction(in_u,in_v,self.additions)
 
     def add_correction(self,u,v,correction_dict):
         self.add_correction_with_direction(u,v,correction_dict)
@@ -223,16 +240,57 @@ class Graph_Summary:
 
     def add_correction_with_direction(self,u,v,correction_dict):
         if not correction_dict.has_key(u):
-            correction_dict[u.index] = set()
-        correction_dict[u.index].add(v.index)
+            correction_dict[u] = set()
+        correction_dict[u].add(v)
 
 if __name__ == "__main__":
     #g = graph_summary_randomized(False,True,False,False,"out.rdf",False)
     g = Graph_Summary(False,True,False,False,"LUBMOld")
-    print g.additions
-    print g.subtractions
-    #print g.s.vcount()
+    print "Additions: %d" % len(g.additions)
+    print "Subtractions: %d" % len(g.subtractions)
+    print "Original graph number of vertices: %d" % g.g.vcount()
+    print "Summary number of vertics: %d" % g.s.vcount()
+    #print g.original_id_to_supernode
     #print g.s.vs['contains']
-    layout = g.s.layout("kk")
-    ig.plot(g.s, layout=layout)
+    #print g.g.summary()
+    #layout = g.g.layout("kk")
+    #ig.plot(g.g, layout=layout)
+    #layout = g.s.layout("kk")
+    #ig.plot(g.s, layout=layout)
+
+    num_connected_with_superedge = 0
+    num_connected_with_correction = 0
+    num_not_connected = 0
+    for i in range(3000):
+        u_original = random.randint(0,g.g.vcount()-1)
+        u_neighborhood = g.g.neighborhood(vertices=u_original,order=1,mode='all')
+        u_neighborhood.remove(u_original)
+        u_neighbor = random.sample(u_neighborhood, 1)[0]
+        #check if these two nodes originally connected are connected in the summary
+        super_node_u_original_id = g.original_id_to_supernode[u_original]
+        super_node_u = g.s.vs.find(original_id = super_node_u_original_id)
+        super_node_v_original_id = g.original_id_to_supernode[u_neighbor]
+        super_node_v = g.s.vs.find(original_id= super_node_v_original_id)
+        #print super_node_v
+        #print super_node_u
+        if g.s.are_connected(super_node_u,super_node_v):
+            num_connected_with_superedge += 1
+        elif g.additions.has_key(u_original) and u_neighbor in g.additions[u_original]:
+            num_connected_with_correction += 1
+        else:
+            print "Nodes not connected: %d %d" % (u_original, u_neighbor)
+            num_not_connected += 1
+
+    print "Num connected via super edge: %d" % num_connected_with_superedge
+    print "Num connected via correction: %d" % num_connected_with_correction
+    print "Num not connected: %d" % num_not_connected
+
+    support = []
+
+    for edge in g.s.es:
+        u = edge.source
+        v = edge.target
+        support.append(g.get_support_of_edge_between_supernodes(u,v))
+
+    print "Average support of super edge: %f" % (sum(support) / float(len(support)))
 

@@ -23,7 +23,7 @@ class Graph_importer:
             graph, id_to_node_name = self.get_graph_from_file()
 
         if not self.include_attributes:
-            attribute_nodes = graph.vs.select(_degree_gt = 75)
+            attribute_nodes = [] #graph.vs.select(_degree_gt = 75)
             graph.delete_vertices(attribute_nodes)
         return graph, id_to_node_name
 
@@ -39,7 +39,6 @@ class Graph_importer:
                 subject_name = arr[0]
                 predicate_name = arr[1]
                 object_name = arr[2]
-
                 if can_skip(subject_name, predicate_name, object_name):
                     continue
 
@@ -66,7 +65,7 @@ class Graph_importer:
     def get_graph_from_SQLDB(self):
         cnxn = odbc.connect(r'Driver={SQL Server};Server=.\SQLEXPRESS;Database=' + self.dbname + r';Trusted_Connection=yes;')
         cursor = cnxn.cursor()
-        cursor.execute("SELECT * FROM RDF")
+        cursor.execute("""SELECT * FROM RDF WHERE [Object] NOT LIKE '%"%' AND [Object] LIKE '%[^0-9]%'""")
 
         node_name_to_id = {}
         id_to_node_name = {}
@@ -82,6 +81,7 @@ class Graph_importer:
             predicate_name = row.Predicate
             object_name = row.Object
 
+            #print subject_name+" "+predicate_name+" "+object_name
             if can_skip(subject_name, predicate_name, object_name):
                 continue
 
@@ -94,20 +94,21 @@ class Graph_importer:
                 node_name_to_id[object_name] = max_node_id
                 id_to_node_name[max_node_id] = object_name
             edges.add((node_name_to_id[subject_name], node_name_to_id[object_name]))
-            if count > 5000:
+            if count > 10000:
                 break
 
 
         cnxn.close()
 
+        print edges
         g = ig.Graph(directed=self.directed)
         g.add_vertices(max_node_id + 1)
         g.add_edges(edges)
         return g,id_to_node_name
 
 def can_skip(s,p,o):
-    #if '#' in s:
-    #    return True
+    if o[0] == '"':
+        return True
     return False
 
 
