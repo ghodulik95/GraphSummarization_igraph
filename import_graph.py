@@ -23,7 +23,7 @@ class Graph_importer:
             graph, id_to_node_name = self.get_graph_from_file()
 
         if not self.include_attributes:
-            attribute_nodes = [] #graph.vs.select(_degree_gt = 75)
+            attribute_nodes = graph.vs.select(_degree_gt = 5000)
             graph.delete_vertices(attribute_nodes)
         return graph, id_to_node_name
 
@@ -73,7 +73,6 @@ class Graph_importer:
         max_node_id = -1
         count = 0
         while 1:
-            count += 1
             row = cursor.fetchone()
             if not row:
                 break
@@ -94,16 +93,19 @@ class Graph_importer:
                 node_name_to_id[object_name] = max_node_id
                 id_to_node_name[max_node_id] = object_name
             edges.add((node_name_to_id[subject_name], node_name_to_id[object_name]))
-            if count > 10000:
+            count += 1
+            if count > 40000:
                 break
 
 
         cnxn.close()
 
-        print edges
+        #print edges
         g = ig.Graph(directed=self.directed)
         g.add_vertices(max_node_id + 1)
         g.add_edges(edges)
+        print g.ecount()
+        print g.vcount()
         return g,id_to_node_name
 
 def can_skip(s,p,o):

@@ -18,10 +18,10 @@ class Graph_Summary:
         self.g, self.original_id_to_name = graph_importer.get_graph_from_RDFDB()
         del graph_importer
 
-        self.original_id_to_supernode = {}
-        for i in range(self.g.vcount()):
-            self.original_id_to_supernode[i] = i
         self.s = self.make_blank_summary()
+        self.original_id_to_supernode = {}
+        for sn in self.s.vs:
+            self.original_id_to_supernode[sn.index] = sn
         self.additions = {}
         self.subtractions = {}
         self.max_original_id = self.g.vcount()
@@ -50,7 +50,7 @@ class Graph_Summary:
         return self.g.vs[node_index].degree()
 
     def get_node_with_original_id(self, original_id):
-        return self.s.vs.select(original_id = original_id)
+        return self.original_id_to_supernode[original_id]
 
     def get_vertices_with_original_n_hop_connection(self, super_node,n):
         seed_nodes = super_node['contains']
@@ -63,14 +63,17 @@ class Graph_Summary:
         return self.original_nodes_to_supernodes(original_two_hop_neighbors)
 
     def original_nodes_to_supernodes(self,original_nodes):
-        supernode_original_ids = set(map(lambda x : self.original_id_to_supernode[x], list(original_nodes)))
-        super_node_indexes = set()
-        for neighbor in self.s.vs.select(original_id_in = supernode_original_ids):
-            super_node_indexes.add(neighbor.index)
-        super_node_neighbors = set()
-        for i in super_node_indexes:
-            super_node_neighbors.add(self.s.vs[i])
-        return super_node_neighbors
+        for n in original_nodes:
+            print self.original_id_to_supernode[n]
+        supernodes= set(map(lambda x : self.original_id_to_supernode[x], list(original_nodes)))
+        print original_nodes
+        #super_node_indexes = set()
+        #for neighbor in self.s.vs.select(original_id_in = supernode_original_ids):
+        #    super_node_indexes.add(neighbor.index)
+        #super_node_neighbors = set()
+        #for i in super_node_indexes:
+        #    super_node_neighbors.add(self.s.vs[i])
+        return supernodes
 
     def get_number_of_connections_between_supernodes(self,u,v):
         return self.get_number_of_connections_in_original(u['contains'], v)
@@ -131,7 +134,7 @@ class Graph_Summary:
         #           This method will be much faster unless |s| << |Vs|, in which case it could be very sub-optimal
         #   So, we will attempt B num_attempts_cutoff times. Potentially some analysis can tell us what the optimal cutoff is
 
-        if len(s) > 2:
+        """if len(s) > 2:
             num_attempts = 0
             cutoff = self.s.vcount() / 2
             while num_attempts < cutoff:
@@ -139,29 +142,31 @@ class Graph_Summary:
                 rand_supernode = self.s.vs[rand_index]
                 if rand_supernode['original_id'] in s:
                     return rand_supernode
-                num_attempts += 1
+                num_attempts += 1"""
         rand_original_id = random.sample(s,1)[0]
-        return self.s.vs.find(original_id = rand_original_id)
+        return self.original_id_to_supernode[rand_original_id]
 
     def merge_supernodes(self,u,v,cost):
         self.s.add_vertices(1)
         new_index = self.s.vcount() - 1
-        new_original_id = self.max_original_id
         self.s.vs[new_index]['cost'] = cost
         self.s.vs[new_index]['contains'] = u['contains'].union(v['contains'])
-        self.s.vs[new_index]['original_id'] = new_original_id
-        self.max_original_id += 1
-        self.update_original_id_to_supernode(u,v,new_original_id)
+        new_original_id = self.update_original_id_to_supernode(u,v,self.s.vs[new_index])
         self.s.delete_vertices([u,v])
         return new_original_id
 
-    def update_original_id_to_supernode(self,u,v,new_original_id):
-        self.assign_new_supernode(u,new_original_id)
-        self.assign_new_supernode(v,new_original_id)
+    def update_original_id_to_supernode(self,u,v,supernode):
+        self.assign_new_supernode(u,supernode)
+        self.assign_new_supernode(v,supernode)
+        new_original_id = self.max_original_id
+        supernode['original_id'] = new_original_id
+        self.original_id_to_supernode[new_original_id] = supernode
+        self.max_original_id += 1
+        return new_original_id
 
-    def assign_new_supernode(self,node,new_supernode_original_id):
+    def assign_new_supernode(self,node,new_supernode):
         for id in node['contains']:
-            self.original_id_to_supernode[id] = new_supernode_original_id
+            self.original_id_to_supernode[id] = new_supernode
 
     def generate_summary(self):
         self.annotate_summary()
@@ -186,24 +191,25 @@ class Graph_Summary:
                         suv_best = suv
                         v_best = v
                         cost_w_best = cost_w
-            #print suv_best
+            print suv_best
             if suv_best > 0:
-                #print u['original_id']
-                unfinished.remove(u['original_id'])
-                #print v_best['original_id']
-                unfinished.remove(v_best['original_id'])
                 if u['original_id'] in removed:
                     print "U IN REMOVED"
                 if v_best['original_id'] in removed:
                     print "V IN REMOVED"
                 removed.add(u['original_id'])
                 removed.add(v_best['original_id'])
+                #print u['original_id']
+                unfinished.remove(u['original_id'])
+                #print v_best['original_id']
+                unfinished.remove(v_best['original_id'])
+
                 new_node_original_id = self.merge_supernodes(u,v_best,cost_w_best)
                 unfinished.add(new_node_original_id)
             else:
                 unfinished.remove(u['original_id'])
             count += 1
-            if count % 50 == 0:
+            if count % 1 == 0:
                 now = time.time()
                 print "%d iterations done, %d seconds elapsed" % (count, (now - start))
 
@@ -245,7 +251,9 @@ class Graph_Summary:
 
 if __name__ == "__main__":
     #g = graph_summary_randomized(False,True,False,False,"out.rdf",False)
-    g = Graph_Summary(False,True,False,False,"LUBMOld")
+    dbname = "LUBMOld"
+    g = Graph_Summary(False,True,False,False,dbname)
+    print dbname
     print "Additions: %d" % len(g.additions)
     print "Subtractions: %d" % len(g.subtractions)
     print "Original graph number of vertices: %d" % g.g.vcount()
@@ -261,25 +269,30 @@ if __name__ == "__main__":
     num_connected_with_superedge = 0
     num_connected_with_correction = 0
     num_not_connected = 0
-    for i in range(3000):
+    num = 0
+    while num < 5000:
         u_original = random.randint(0,g.g.vcount()-1)
         u_neighborhood = g.g.neighborhood(vertices=u_original,order=1,mode='all')
         u_neighborhood.remove(u_original)
-        u_neighbor = random.sample(u_neighborhood, 1)[0]
-        #check if these two nodes originally connected are connected in the summary
-        super_node_u_original_id = g.original_id_to_supernode[u_original]
-        super_node_u = g.s.vs.find(original_id = super_node_u_original_id)
-        super_node_v_original_id = g.original_id_to_supernode[u_neighbor]
-        super_node_v = g.s.vs.find(original_id= super_node_v_original_id)
-        #print super_node_v
-        #print super_node_u
-        if g.s.are_connected(super_node_u,super_node_v):
-            num_connected_with_superedge += 1
-        elif g.additions.has_key(u_original) and u_neighbor in g.additions[u_original]:
-            num_connected_with_correction += 1
-        else:
-            print "Nodes not connected: %d %d" % (u_original, u_neighbor)
-            num_not_connected += 1
+        if len(u_neighborhood) > 0:
+            u_neighbor = random.sample(u_neighborhood, 1)[0]
+            #check if these two nodes originally connected are connected in the summary
+            super_node_u = g.original_id_to_supernode[u_original]
+            #super_node_u = g.s.vs.find(original_id = super_node_u_original_id)
+            super_node_v = g.original_id_to_supernode[u_neighbor]
+            #super_node_v = g.s.vs.find(original_id= super_node_v_original_id)
+            #print super_node_v
+            #print super_node_u
+            if g.s.are_connected(super_node_u,super_node_v):
+                num_connected_with_superedge += 1
+            elif g.additions.has_key(u_original) and u_neighbor in g.additions[u_original]:
+                num_connected_with_correction += 1
+            else:
+                print "Nodes not connected: %d %d" % (u_original, u_neighbor)
+                num_not_connected += 1
+            num += 1
+
+
 
     print "Num connected via super edge: %d" % num_connected_with_superedge
     print "Num connected via correction: %d" % num_connected_with_correction
