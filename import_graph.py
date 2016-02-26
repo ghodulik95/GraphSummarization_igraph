@@ -23,7 +23,7 @@ class Graph_importer:
             graph, id_to_node_name = self.get_graph_from_file()
 
         if not self.include_attributes:
-            attribute_nodes = [] #graph.vs.select(_degree_gt = 75)
+            attribute_nodes = graph.vs.select(_degree_gt = 5000)
             graph.delete_vertices(attribute_nodes)
         return graph, id_to_node_name
 
@@ -58,14 +58,24 @@ class Graph_importer:
         g = ig.Graph(directed=self.directed)
         g.add_vertices(max_node_id + 1)
         g.add_edges(edges)
+
         return g, id_to_node_name
 
 
 
     def get_graph_from_SQLDB(self):
         cnxn = odbc.connect(r'Driver={SQL Server};Server=.\SQLEXPRESS;Database=' + self.dbname + r';Trusted_Connection=yes;')
+        #cnxn.autoCommit = True
         cursor = cnxn.cursor()
-        cursor.execute("""SELECT * FROM RDF WHERE [Object] NOT LIKE '%"%' AND [Object] LIKE '%[^0-9]%'""")
+        if self.dbname == "DBLP4":
+            year_start = 1990
+            year_end = 1992
+            lim_num_docs = 10
+            params = (year_start, year_end, lim_num_docs)
+            q = "Exec Rows_From_Year_Range @year_start = %d, @year_end = %d, @lim_num_docs = %d" % params
+            cursor.execute(q)
+        else:
+            cursor.execute("""SELECT * FROM RDF WHERE [Object] NOT LIKE '%"%' AND [Object] LIKE '%[^0-9]%'""")
 
         node_name_to_id = {}
         id_to_node_name = {}
@@ -73,7 +83,6 @@ class Graph_importer:
         max_node_id = -1
         count = 0
         while 1:
-            count += 1
             row = cursor.fetchone()
             if not row:
                 break
@@ -94,7 +103,8 @@ class Graph_importer:
                 node_name_to_id[object_name] = max_node_id
                 id_to_node_name[max_node_id] = object_name
             edges.add((node_name_to_id[subject_name], node_name_to_id[object_name]))
-            if count > 10000:
+            count += 1
+            if count > 5000:
                 break
 
 
