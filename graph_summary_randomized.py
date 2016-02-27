@@ -3,6 +3,7 @@ import igraph as ig
 import random
 import time
 import unique_colors
+import math
 
 class Graph_Summary:
     def __init__(self, directed, include_edges, include_attributes, edges_annotated, dbname, sql_database = True, wa=1, wc = 1, we = 1 ):
@@ -175,6 +176,11 @@ class Graph_Summary:
         #return
         unfinished = set(self.s.vs['name'])
         removed = set()
+        cutoff = 0.5
+        step = 0.01
+        num_skips = 0
+        num_allowable_skips = 10
+
         print "Beginning"
         start = time.time()
         count = 0
@@ -194,7 +200,10 @@ class Graph_Summary:
                         v_best = v
                         cost_w_best = cost_w
             #print suv_best
-            if suv_best > 0:
+            #import pdb
+            #pdb.set_trace()
+            #print num_skips
+            if suv_best >= cutoff:
                 #print u['name']
                 unfinished.remove(u['name'])
                 #print v_best['name']
@@ -206,9 +215,18 @@ class Graph_Summary:
                 removed.add(u['name'])
                 removed.add(v_best['name'])
                 new_name = self.merge_supernodes(u,v_best,cost_w_best)
+                self.s.vs.find(new_name)['iteration'] = count
                 unfinished.add(new_name)
-            else:
+            elif suv_best <= 0:
+                u['iteration'] = count
                 unfinished.remove(u['name'])
+            else:
+                num_skips += 1
+                count -= 1
+                if num_skips >= num_allowable_skips:
+                    #print "RESTART"
+                    cutoff -= step
+                    num_skips = 0
             count += 1
             if count % 50 == 0:
                 now = time.time()
@@ -233,13 +251,13 @@ class Graph_Summary:
     def make_drawable(self):
         colors = unique_colors.uniquecolors(self.s.vcount()*2 + 2)
         for n in self.s.vs:
-            n['size'] = len(n['contains'])*15
-            n['label'] = len(n['contains'])
+            n['size'] = 16 + math.log(len(n['contains']),2)*7
+            n['label'] = n['iteration']
             color = colors.pop()
             n['color'] = color
             for c in n['contains']:
                 self.g.vs[c]['color'] = color
-                self.g.vs[c]['label'] = len(n['contains'])
+                self.g.vs[c]['label'] = n['iteration']
 
     def add_subtractions(self,u,v):
         for in_u in u['contains']:
@@ -270,14 +288,19 @@ if __name__ == "__main__":
     print "Subtractions: %d" % len(g.subtractions)
     print "Original graph number of vertices: %d" % g.g.vcount()
     print "Summary number of vertics: %d" % g.s.vcount()
+
+    for v in g.s.vs:
+        print "%s contains nodes " % v['label']
+        for n in v['contains']:
+            print g.original_id_to_name[n]
     #print g.original_id_to_supernode
     #print g.s.vs['contains']
     #print g.g.summary()
     if g.g.vcount() < 300:
         layout = g.g.layout("kk")
-        ig.plot(g.g, layout=layout)
+        ig.plot(g.g, layout=layout).save("DBLPWithLabels_orginal_larger")
         layout = g.s.layout("kk")
-        ig.plot(g.s, layout=layout)
+        ig.plot(g.s, layout=layout).save("DBLPWithLabels_summary_larger")
 
     num_connected_with_superedge = 0
     num_connected_with_correction = 0
