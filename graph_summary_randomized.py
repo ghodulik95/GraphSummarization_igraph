@@ -59,6 +59,25 @@ class Graph_Summary:
     def get_node_with_original_node_index(self, original_index):
         return self.get_node_with_original_name(self.get_name_form(original_index))
 
+    def get_vertices_with_original_two_hop_connection_exactly(self, super_node):
+        seed_nodes = list(super_node['contains'])
+        original_two_hop_neighbors = set()
+        neighbors = set()
+        neighborhoods = self.g.neighborhood(vertices=seed_nodes,order=1,mode="all")
+        #print neighborhoods
+        for i in range(len(neighborhoods)):
+            for neighbor in neighborhoods[i]:
+                if seed_nodes[i] != neighbor:
+                    neighbors.add(neighbor)
+        seed_nodes = list(neighbors)
+        neighborhoods = self.g.neighborhood(vertices=seed_nodes,order=1,mode="all")
+        for i in range(len(neighborhoods)):
+            for neighbor in neighborhoods[i]:
+                if seed_nodes[i] != neighbor:
+                    original_two_hop_neighbors.add(neighbor)
+        return self.original_nodes_to_supernodes(original_two_hop_neighbors)
+
+
     def get_vertices_with_original_n_hop_connection(self, super_node,n):
         seed_nodes = super_node['contains']
         original_two_hop_neighbors = set()
@@ -101,34 +120,43 @@ class Graph_Summary:
     def get_potential_number_of_connections_in_original(self,original_nodes,neighbor):
         return len(original_nodes)*len(neighbor['contains'])
 
+    def get_cost_of_supernode(self,node):
+        neighbors = self.get_vertices_with_original_n_hop_connection(node,1)
+        return self.get_cost_of_supernode_containing(node['contains'], neighbors)
+
+    def get_cost_of_supernode_containing(self,nodes, super_neighbors):
+        cost = 0
+        for sn in super_neighbors:
+            pi_wn = self.get_potential_number_of_connections_in_original(nodes,sn)
+            a_wn = self.get_number_of_connections_in_original(nodes,sn)
+
+            if pi_wn < a_wn:
+                print "Actual more than potential"
+
+            if pi_wn - a_wn + 1 < a_wn:
+                cost += pi_wn - a_wn + 1
+            else:
+                cost += a_wn
+        return cost
+
     #Calculates s(u,v) of supernodes u and v
     def calc_suv(self,u,v):
-        if u['cost'] < 0 or v['cost'] < 0:
+        u_cost = self.get_cost_of_supernode(u)
+        v_cost = self.get_cost_of_supernode(v)
+        if u_cost < 0 or v_cost < 0:
             print "NEGATIVE"
-        if u['cost'] == 0 or v['cost'] == 0:
+        if u_cost == 0 or v_cost == 0:
             return 0, None
 
         u_neighbors = self.get_vertices_with_original_n_hop_connection(u,1)
         v_neighbors = self.get_vertices_with_original_n_hop_connection(v,1)
 
         super_neighbors = u_neighbors.union(v_neighbors)
+        original_nodes_in_w = u['contains'].union(v['contains'])
 
-        #W is u merged with v
-        cost_w = 0
-        for sn in super_neighbors:
-            original_nodes_in_w = u['contains'].union(v['contains'])
-            pi_wn = self.get_potential_number_of_connections_in_original(original_nodes_in_w,sn)
-            A_wn = self.get_number_of_connections_in_original(original_nodes_in_w,sn)
+        cost_w = self.get_cost_of_supernode_containing(original_nodes_in_w, super_neighbors)
 
-            if pi_wn < A_wn:
-                print "Actual more than potential"
-
-            if pi_wn - A_wn + 1 < A_wn:
-                cost_w += pi_wn - A_wn + 1
-            else:
-                cost_w += A_wn
-
-        return float(u['cost'] + v['cost'] - cost_w) / float(u['cost'] + v['cost']), cost_w
+        return float(u_cost + v_cost - cost_w) / float(u_cost + v_cost), cost_w
 
     def pick_random_supernode_in_set(self, s):
         #Two methods :
@@ -187,7 +215,7 @@ class Graph_Summary:
         while len(unfinished) > 0:
 
             u = self.pick_random_supernode_in_set(unfinished)
-            two_hop_neighbors = self.get_vertices_with_original_n_hop_connection(u,2)
+            two_hop_neighbors = self.get_vertices_with_original_two_hop_connection_exactly(u)
 
             v_best = None
             suv_best = 0
@@ -199,7 +227,7 @@ class Graph_Summary:
                         suv_best = suv
                         v_best = v
                         cost_w_best = cost_w
-            #print suv_best
+            print suv_best
             #import pdb
             #pdb.set_trace()
             #print num_skips
@@ -248,6 +276,9 @@ class Graph_Summary:
             nodes_tried.add(u)
         self.make_drawable()
 
+    def get_cost(self):
+        return self.s.ecount() + len(self.additions) + len(self.subtractions)
+
     def make_drawable(self):
         colors = unique_colors.uniquecolors(self.s.vcount()*2 + 2)
         for n in self.s.vs:
@@ -287,20 +318,24 @@ if __name__ == "__main__":
     print "Additions: %d" % len(g.additions)
     print "Subtractions: %d" % len(g.subtractions)
     print "Original graph number of vertices: %d" % g.g.vcount()
-    print "Summary number of vertics: %d" % g.s.vcount()
+    print "Summary number of vertices: %d" % g.s.vcount()
+    print "Original graph number of edges: %d" % g.g.ecount()
+    print "Summary number of superedges: %d" % g.s.ecount()
+    print "Summary cost: %d" % g.get_cost()
 
     for v in g.s.vs:
-        print "%s contains nodes " % v['label']
+       # print "%s contains nodes " % v['label']
         for n in v['contains']:
-            print g.original_id_to_name[n]
+            pass
+            #print g.original_id_to_name[n]
     #print g.original_id_to_supernode
     #print g.s.vs['contains']
     #print g.g.summary()
     if g.g.vcount() < 300:
         layout = g.g.layout("kk")
-        ig.plot(g.g, layout=layout).save("DBLPWithLabels_orginal_larger")
+        ig.plot(g.g, layout=layout).save("DBLPWithLabels_orginal_larger_nocutoff.png")
         layout = g.s.layout("kk")
-        ig.plot(g.s, layout=layout).save("DBLPWithLabels_summary_larger")
+        ig.plot(g.s, layout=layout).save("DBLPWithLabels_summary_larger_nocutoff.png")
 
     num_connected_with_superedge = 0
     num_connected_with_correction = 0
