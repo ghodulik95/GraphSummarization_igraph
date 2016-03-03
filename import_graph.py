@@ -70,7 +70,7 @@ class Graph_importer:
         if self.dbname == "DBLP4":
             year_start = 1990
             year_end = 1992
-            lim_num_docs = 50
+            lim_num_docs = 200
             params = (year_start, year_end, lim_num_docs)
             q = "Exec Rows_From_Year_Range @year_start = %d, @year_end = %d, @lim_num_docs = %d" % params
             cursor.execute(q)
@@ -104,7 +104,7 @@ class Graph_importer:
                 id_to_node_name[max_node_id] = object_name
             edges.add((node_name_to_id[subject_name], node_name_to_id[object_name]))
             count += 1
-            if count > 100:
+            if count > 1500:
                 break
 
 

@@ -227,7 +227,7 @@ class Graph_Summary:
                         suv_best = suv
                         v_best = v
                         cost_w_best = cost_w
-            print suv_best
+            #print suv_best
             #import pdb
             #pdb.set_trace()
             #print num_skips
@@ -275,6 +275,8 @@ class Graph_Summary:
                         self.add_additions(u,v)
             nodes_tried.add(u)
         self.make_drawable()
+        now = time.time()
+        self.runtime = (now - start)
 
     def get_cost(self):
         return self.s.ecount() + len(self.additions) + len(self.subtractions)
@@ -282,13 +284,14 @@ class Graph_Summary:
     def make_drawable(self):
         colors = unique_colors.uniquecolors(self.s.vcount()*2 + 2)
         for n in self.s.vs:
-            n['size'] = 16 + math.log(len(n['contains']),2)*7
+            n['size'] = 30 + math.log(len(n['contains']),2)*7
             n['label'] = n['iteration']
             color = colors.pop()
             n['color'] = color
             for c in n['contains']:
                 self.g.vs[c]['color'] = color
                 self.g.vs[c]['label'] = n['iteration']
+                self.g.vs[c]['size'] = 30
 
     def add_subtractions(self,u,v):
         for in_u in u['contains']:
@@ -315,27 +318,32 @@ if __name__ == "__main__":
     dbname = "DBLP4"
     #g = graph_summary_randomized(False,True,False,False,"out.rdf",False)
     g = Graph_Summary(False,True,False,False,dbname)
-    print "Additions: %d" % len(g.additions)
-    print "Subtractions: %d" % len(g.subtractions)
-    print "Original graph number of vertices: %d" % g.g.vcount()
-    print "Summary number of vertices: %d" % g.s.vcount()
-    print "Original graph number of edges: %d" % g.g.ecount()
-    print "Summary number of superedges: %d" % g.s.ecount()
-    print "Summary cost: %d" % g.get_cost()
+    f = open("DBLP200.txt", "w")
+    f.write("%s - %d" % (dbname, g.runtime))
+    f.write("Additions: %d\n" % len(g.additions))
+    f.write("Subtractions: %d\n" % len(g.subtractions))
+    f.write("Original graph number of vertices: %d\n" % g.g.vcount())
+    f.write("Summary number of vertices: %d\n" % g.s.vcount())
+    f.write("Original graph number of edges: %d\n" % g.g.ecount())
+    f.write("Summary number of superedges: %d\n" % g.s.ecount())
+    f.write("Summary cost: %d\n" % g.get_cost())
 
-    for v in g.s.vs:
-       # print "%s contains nodes " % v['label']
-        for n in v['contains']:
-            pass
-            #print g.original_id_to_name[n]
-    #print g.original_id_to_supernode
-    #print g.s.vs['contains']
-    #print g.g.summary()
-    if g.g.vcount() < 300:
+    #f.write(g.original_id_to_supernode
+    #f.write(g.s.vs['contains']
+    #f.write(g.g.summary()
+    if g.g.vcount() < 3000000:
         layout = g.g.layout("kk")
-        ig.plot(g.g, layout=layout).save("DBLPWithLabels_orginal_larger_nocutoff.png")
-        layout = g.s.layout("kk")
-        ig.plot(g.s, layout=layout).save("DBLPWithLabels_summary_larger_nocutoff.png")
+        visual_style = {}
+        visual_style["layout"] = layout
+        visual_style["bbox"] = (1650, 1650)
+        #visual_style["margin"] = 10
+        ig.plot(g.g, **visual_style).save("DBLP200_original.png")
+        layout = g.s.layout()
+        visual_style = {}
+        visual_style["layout"] = layout
+        visual_style["bbox"] = (1650, 1650)
+        #visual_style["margin"] = 10
+        ig.plot(g.s, **visual_style).save("DBLP200_summary.png")
 
     num_connected_with_superedge = 0
     num_connected_with_correction = 0
@@ -350,19 +358,19 @@ if __name__ == "__main__":
         super_node_u = g.s.vs.find(super_node_u_name)
         super_node_v_name = g.original_id_to_supernode_name[u_neighbor]
         super_node_v = g.s.vs.find(super_node_v_name)
-        #print super_node_v
-        #print super_node_u
+        #f.write(super_node_v
+        #f.write(super_node_u
         if g.s.are_connected(super_node_u,super_node_v):
             num_connected_with_superedge += 1
         elif g.additions.has_key(u_original) and u_neighbor in g.additions[u_original]:
             num_connected_with_correction += 1
         else:
-            print "Nodes not connected: %d %d" % (u_original, u_neighbor)
+            f.write("Nodes not connected: %d %d\n" % (u_original, u_neighbor))
             num_not_connected += 1
 
-    print "Num connected via super edge: %d" % num_connected_with_superedge
-    print "Num connected via correction: %d" % num_connected_with_correction
-    print "Num not connected: %d" % num_not_connected
+    f.write("Num connected via super edge: %d\n" % num_connected_with_superedge)
+    f.write("Num connected via correction: %d\n" % num_connected_with_correction)
+    f.write("Num not connected: %d\n" % num_not_connected)
 
     support = []
 
@@ -371,5 +379,11 @@ if __name__ == "__main__":
         v = edge.target
         support.append(g.get_support_of_edge_between_supernodes(u,v))
 
-    print "Average support of super edge: %f" % (sum(support) / float(len(support)))
+    f.write("Average support of super edge: %f\n" % (sum(support) / float(len(support))))
+
+    for v in g.s.vs:
+        f.write("%s contains nodes \n" % v['label'])
+        for n in v['contains']:
+            f.write(g.original_id_to_name[n]+"\n")
+    f.close()
 
