@@ -1,9 +1,10 @@
 import pyodbc as odbc
 import igraph as ig
+import random
 
 class Graph_importer:
 
-    def __init__(self, graph_summary_specs):
+    def __init__(self, graph_summary_specs, num_vertices = None, num_edges = None):
         self.directed = graph_summary_specs.directed
         self.include_edges = graph_summary_specs.include_edges
         self.include_attributes = graph_summary_specs.include_attributes
@@ -13,10 +14,14 @@ class Graph_importer:
         self.we = graph_summary_specs.we
         self.dbname = graph_summary_specs.dbname
         self.sql_database = graph_summary_specs.sql_database
+        self.num_vertices = num_vertices
+        self.num_edges = num_edges
 
     def get_graph_from_RDFDB(self):
         graph = None
         id_to_node_name = None
+        if self.dbname == "random":
+            return self.get_random_graph()
         if self.sql_database:
             graph, id_to_node_name = self.get_graph_from_SQLDB()
         else:
@@ -26,6 +31,24 @@ class Graph_importer:
             attribute_nodes = graph.vs.select(_degree_gt = 5000)
             graph.delete_vertices(attribute_nodes)
         return graph, id_to_node_name
+
+    def get_random_graph(self):
+        g = ig.Graph()
+        g.add_vertices(self.num_vertices)
+
+        edges_added = 0
+        while edges_added < self.num_edges:
+            node1 = random.randint(0,self.num_vertices - 1)
+            node2 = random.randint(0,self.num_vertices - 1)
+            if node1 == node2:
+                continue
+            if g.are_connected(node1, node2):
+                continue
+            g.add_edge(node1, node2)
+            edges_added += 1
+        id_to_node_name = {i:str(i) for i in range(0,self.num_vertices)}
+
+        return g, id_to_node_name
 
     def get_graph_from_file(self):
         node_name_to_id = {}
