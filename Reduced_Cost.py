@@ -101,9 +101,9 @@ def two_random_nodes(v):
 
 def calc_avg_s(v,e):
     suvs = []
-    for i in range(v):
+    for i in range(0,v,v/100 + 1):
         g = random_graph(v,e)
-        for j in range((v-1)*v/5 + 25):
+        for j in range(0,v):
             n1,n2 = two_random_nodes(v)
             suvs.append(calc_suv(g,n1,n2))
             """u = random.randint(0,v-1)
@@ -126,14 +126,15 @@ def get_2hop_neighbors(g,n):
     return two_hop
 
 if __name__ == "__main__":
-    f = open("results.csv", "w")
+    f = open("results3030.csv", "w")
     f.write('"Num Vertices","Num Edges","Expected","Avg"\n')
-    for v in range(100,101):
-        for e in range(2*v, 2*v + 15):#range(2*v, (v-1)*v/2):
+    for v in range(25,5000, (5000 - 25)/30):
+        for e in range(2*v, ((v-1)*v/2)*4/5, (((v-1)*v/2)*4/5-2*v)/30):
             print "Graph with E=%d, V=%d" % (e,v)
             expected = calc_expected_s(v,e)
             print "Expected reduced cost: %f" % expected
             avg = str(calc_avg_s(v,e))
             print "Avg reduced cost: %s" % avg
             f.write("%d,%d,%f,%s\n" % (e,v,expected,avg))
+        f.flush()
     f.close()
