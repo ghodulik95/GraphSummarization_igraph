@@ -2,6 +2,8 @@ from product import Rational
 import gmpy2
 import igraph as ig
 import random
+import math
+import numpy
 
 def calc_prob_at_least(v,potential_e,e,i):
     r = Rational()
@@ -111,7 +113,8 @@ def calc_avg_s(v,e):
             for s in neighbors:
                 suv = calc_suv(g,s,u)
                 suvs.append(suv)"""
-    return sum(suvs) / len(suvs)
+    suvs = numpy.array(suvs)
+    return numpy.mean(suvs), numpy.std(suvs)
 
 def get_2hop_neighbors(g,n):
     neighbors = g.neighborhood(n,1)
@@ -125,16 +128,35 @@ def get_2hop_neighbors(g,n):
             two_hop.add(two_n)
     return two_hop
 
+def calc_avg_s_scalefree(v,e):
+    suvs = []
+    for i in range(int(math.ceil(math.sqrt(v)))):
+        graph = generate_scale_free(v,e)
+        for j in range(int(math.ceil(math.sqrt(v)))):
+            node1,node2 = two_random_nodes(v)
+            neighbors = get_2hop_neighbors(graph, node1)
+            best_suv = 0
+            for n in neighbors:
+                if n != node1:
+                    suv = calc_suv(graph,node1,n)
+                    if suv > best_suv:
+                        best_suv = suv
+            suvs.append(best_suv)
+    suvs = numpy.array(suvs)
+    return numpy.mean(suvs), numpy.std(suvs)
+
+def generate_scale_free(v,e):
+    return ig.GraphBase.Static_Power_Law(v,e,2,loops=True)
+
 if __name__ == "__main__":
-    f = open("results3030.csv", "w")
-    f.write('"Num Vertices","Num Edges","Expected","Avg"\n')
-    for v in range(25,5000, (5000 - 25)/30):
-        for e in range(2*v, ((v-1)*v/2)*4/5, (((v-1)*v/2)*4/5-2*v)/30):
+    f = open("resultsScalefreeLarger.csv", "w")
+    f.write('"Num Edges","Num Vertices","Avg","Std"\n')
+    for v in range(1000,10000, 1500):
+        for e in range(2*v, ((v-1)*v/2)*95/100, (((v-1)*v/2)*95/100-2*v)/15):
             print "Graph with E=%d, V=%d" % (e,v)
-            expected = calc_expected_s(v,e)
-            print "Expected reduced cost: %f" % expected
-            avg = str(calc_avg_s(v,e))
-            print "Avg reduced cost: %s" % avg
-            f.write("%d,%d,%f,%s\n" % (e,v,expected,avg))
+            avg,std = calc_avg_s_scalefree(v,e)
+            print "Avg reduced cost: %f, Standard Deviation: %f" % (avg,std)
+            f.write("%d,%d,%f,%f\n" % (e,v,avg,std))
+            f.flush()
         f.flush()
     f.close()

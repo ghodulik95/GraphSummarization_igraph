@@ -75,13 +75,11 @@ class Graph_Summary:
                 self.s.vs[i]['cost'] = self.get_initial_cost_of_node(i)
                 self.s.vs[i]['contains'] = {i}
                 self.s.vs[i]['name'] = self.get_name_form(i)
+                self.s.vs[i]['iteration'] = i
                 self.original_id_to_supernode_name[i] = self.get_name_form(i)
 
     def get_name_form(self,i):
         return "Node "+str(i)
-
-    def get_initial_cost_of_node(self,node_index):
-        return self.g.vs[node_index].degree()
 
     def get_node_with_original_name(self, original_name):
         return self.s.vs.find(original_name)
@@ -89,23 +87,20 @@ class Graph_Summary:
     def get_node_with_original_node_index(self, original_index):
         return self.get_node_with_original_name(self.get_name_form(original_index))
 
-    def get_vertices_with_original_two_hop_connection_exactly(self, super_node):
-        seed_nodes = list(super_node['contains'])
+    def get_vertices_with_original_two_hop_connection_exactly(self, node):
         original_two_hop_neighbors = set()
         neighbors = set()
-        neighborhoods = self.g.neighborhood(vertices=seed_nodes,order=1,mode="all")
-        #print neighborhoods
-        for i in range(len(neighborhoods)):
-            for neighbor in neighborhoods[i]:
-                if seed_nodes[i] != neighbor:
-                    neighbors.add(neighbor)
+        neighborhood = self.g.neighbors(node)
+        for neighbor in neighborhood:
+            if node != neighbor:
+                neighbors.add(neighbor)
         seed_nodes = list(neighbors)
         neighborhoods = self.g.neighborhood(vertices=seed_nodes,order=1,mode="all")
         for i in range(len(neighborhoods)):
             for neighbor in neighborhoods[i]:
-                if seed_nodes[i] != neighbor:
+                if seed_nodes[i] != neighbor and node != neighbor:
                     original_two_hop_neighbors.add(neighbor)
-        return self.original_nodes_to_supernodes(original_two_hop_neighbors)
+        return original_two_hop_neighbors
 
 
     def get_vertices_with_original_n_hop_connection(self, super_node,n):
@@ -150,154 +145,79 @@ class Graph_Summary:
     def get_potential_number_of_connections_in_original(self,original_nodes,neighbor):
         return len(original_nodes)*len(neighbor['contains'])
 
-    def get_cost_of_supernode(self,node):
-        neighbors = self.get_vertices_with_original_n_hop_connection(node,1)
-        return self.get_cost_of_supernode_containing(node['contains'], neighbors)
-
-    def get_cost_of_supernode_containing(self,nodes, super_neighbors):
-        cost = 0
-        for sn in super_neighbors:
-            pi_wn = self.get_potential_number_of_connections_in_original(nodes,sn)
-            a_wn = self.get_number_of_connections_in_original(nodes,sn)
-
-            if pi_wn < a_wn:
-                print "Actual more than potential"
-
-            if pi_wn - a_wn + 1 <= a_wn:
-                cost += pi_wn - a_wn + 1
-            else:
-                cost += a_wn
-        return cost
-
-    #Calculates s(u,v) of supernodes u and v
-    def calc_suv(self,u,v):
-        u_cost = self.get_cost_of_supernode(u)
-        v_cost = self.get_cost_of_supernode(v)
-        if u_cost < 0 or v_cost < 0:
-            print "NEGATIVE"
-        if u_cost == 0 or v_cost == 0:
-            return 0, None
-
-        u_neighbors = self.get_vertices_with_original_n_hop_connection(u,1)
-        v_neighbors = self.get_vertices_with_original_n_hop_connection(v,1)
-
-        super_neighbors = u_neighbors.union(v_neighbors)
-        original_nodes_in_w = u['contains'].union(v['contains'])
-
-        cost_w = self.get_cost_of_supernode_containing(original_nodes_in_w, super_neighbors)
-
-        return float(u_cost + v_cost - cost_w) / float(u_cost + v_cost), cost_w
-
-    def pick_random_supernode_in_set(self, s):
-        #Two methods :
-        # A) Pick a random value in s, find the assosciated supernode, and return that
-        #           This method requres linear search across summary. --> expect runtime ~ |Vs| / 2
-        # B) Pick a random supernode, return it if it is in s, otherwise keep picking
-        #           This method will be much faster unless |s| << |Vs|, in which case it could be very sub-optimal
-        #   So, we will attempt B num_attempts_cutoff times. Potentially some analysis can tell us what the optimal cutoff is
-        """
-        if len(s) > 2:
-            num_attempts = 0
-            cutoff = self.s.vcount() / 2
-            while num_attempts < cutoff:
-                rand_index = random.randint(0, self.s.vcount() - 1)
-                rand_supernode = self.s.vs[rand_index]
-                if rand_supernode['name'] in s:
-                    return rand_supernode
-                num_attempts += 1"""
+    def pick_random_node_from_set(self, s):
         rand_original_name = random.sample(s,1)[0]
-        return self.s.vs.find(rand_original_name)
+        return rand_original_name
 
-    def merge_supernodes(self,u,v,cost):
+    def get_summary_indexes(self,original_indexes):
+        summary_indexes = set()
+        for id in original_indexes:
+            name = self.original_id_to_supernode_name[id]
+            index = self.s.vs.find(name).index
+            summary_indexes.add(index)
+        return summary_indexes
+
+    def merge_supernodes(self,to_merge_original_ids):
         self.s.add_vertices(1)
         new_index = self.s.vcount() - 1
         new_name = self.get_name_form(self.max_original_id)
-        self.s.vs[new_index]['cost'] = cost
-        self.s.vs[new_index]['contains'] = u['contains'].union(v['contains'])
+        self.s.vs[new_index]['contains'] = to_merge_original_ids
         self.s.vs[new_index]['name'] = new_name
+        #self.s.vs[new_index]['iteration'] = 1
         self.max_original_id += 1
-        self.update_original_id_to_supernode(u,v,new_name)
-        self.s.delete_vertices([u,v])
+        summary_ids = self.get_summary_indexes(to_merge_original_ids)
+        self.update_original_id_to_supernode(to_merge_original_ids,new_name)
+        self.s.delete_vertices(summary_ids)
         return new_name
 
-    def update_original_id_to_supernode(self, u, v, new_name):
-        self.assign_new_supernode(u, new_name)
-        self.assign_new_supernode(v, new_name)
+    def update_original_id_to_supernode(self, to_merge_original_ids, new_name):
+        for id in to_merge_original_ids:
+            self.assign_new_supernode(id, new_name)
 
-    def assign_new_supernode(self, node, new_name):
-        for id in node['contains']:
-            self.original_id_to_supernode_name[id] = new_name
+    def assign_new_supernode(self, id, new_name):
+        self.original_id_to_supernode_name[id] = new_name
+
+    def get_dense_subgraph_nodes(self,u):
+        two_hop_neighbors = self.get_vertices_with_original_two_hop_connection_exactly(u)
+        u_neighbors = set(self.g.neighbors(u))
+        to_merge = set([u])
+        for n in two_hop_neighbors:
+            n_neighbors = set(self.g.neighbors(n))
+            common_neighbors =  u_neighbors.intersection(n_neighbors)
+            all_neighbors = u_neighbors.union(n_neighbors)
+            uncommon_neighbors = all_neighbors.difference(common_neighbors)
+            percent_common = float(len(common_neighbors)) / len(all_neighbors)
+            percent_uncommon = float(len(uncommon_neighbors)) / len(all_neighbors)
+            if percent_common > percent_uncommon:
+                to_merge.add(n)
+        return to_merge
 
     def generate_summary(self):
         #self.annotate_summary()
         #print self.s.vs[3489]
         #return
-        unfinished = set(self.s.vs['name'])
-        removed = set()
         v = self.g.vcount()
         e = self.g.ecount()
-        cutoff = 0.5#8.0*e/(v*(v-1))
-        self.cutoff = cutoff
-        print cutoff
-        step = 0.01
-        num_skips = 0
-        num_allowable_skips = 10
 
-        print "Beginning"
+        unvisited = set([i for i in range(v)])
+        visited = set()
+
         start = time.time()
-        count = 0
-        while len(unfinished) > 0:
+        count = v
+        while len(unvisited) > 0:
 
-            u = self.pick_random_supernode_in_set(unfinished)
-            two_hop_neighbors = self.get_vertices_with_original_two_hop_connection_exactly(u)
+            u = self.pick_random_node_from_set(unvisited)
 
-            v_best = None
-            suv_best = 0
-            cost_w_best = None
-            for v in two_hop_neighbors:
-                if v.index != u.index:
-                    suv, cost_w = self.calc_suv(u,v)
-                    if suv > suv_best:
-                        suv_best = suv
-                        v_best = v
-                        cost_w_best = cost_w
-            #print suv_best
-            #import pdb
-            #pdb.set_trace()
-            #print num_skips
-            if suv_best >= cutoff and cutoff>0:
-                if u['name'] in removed:
-                    print "U IN REMOVED"
-                if v_best['name'] in removed:
-                    print "V IN REMOVED"
-
-                #This should not be necessary
-                if u['name'] in unfinished and v_best['name'] in unfinished:
-                    unfinished.remove(u['name'])
-                    unfinished.remove(v_best['name'])
-                else:
-                    continue
-
-                removed.add(u['name'])
-                removed.add(v_best['name'])
-                new_name = self.merge_supernodes(u,v_best,cost_w_best)
+            dense_subgraph_nodes = self.get_dense_subgraph_nodes(u)
+            dense_subgraph_nodes.difference_update(visited)
+            if len(dense_subgraph_nodes) > 1:
+                #print "U: %d" % u
+                #print dense_subgraph_nodes
+                new_name = self.merge_supernodes(dense_subgraph_nodes)
                 self.s.vs.find(new_name)['iteration'] = count
-                unfinished.add(new_name)
-            elif suv_best <= 0:
-                u['iteration'] = count
-                unfinished.remove(u['name'])
-            else:
-                num_skips += 1
-                count -= 1
-                if num_skips >= num_allowable_skips:
-                    #print "RESTART"
-                    if cutoff - step > 0:
-                        cutoff -= step
-                    num_skips = 0
-            count += 1
-            if count % 50 == 0:
-                now = time.time()
-                print "%d iterations done, %d seconds elapsed" % (count, (now - start))
+            count+=1
+            unvisited.difference_update(dense_subgraph_nodes)
+            visited.update(dense_subgraph_nodes)
 
         nodes_tried = set()
         for u in self.s.vs:
@@ -455,8 +375,8 @@ if __name__ == "__main__":
     print "First done"
     #g2 = Graph_Summary(source_summary=g)
 
-    visualize("DBLP50_regular",g)
-    write_report("DBLP50_regular",g)
+    visualize("DBLP300_dense_subgraphs",g)
+    write_report("DBLP300_dense_subgraphs",g)
     #visualize("DBLP300_testingsecond",g2)
     #write_report("DBLP300_testingsecond",g2)
 

@@ -40,6 +40,7 @@ class Graph_Summary:
             self.subtractions = {}
             self.max_original_id = self.g.vcount()
             self.annotate_summary()
+            self.s.vs['haircontains'] = [None for _ in range(self.s.vcount())]
             self.generate_summary()
 
     @staticmethod
@@ -73,8 +74,9 @@ class Graph_Summary:
         if self.s.ecount() == 0:
             for i in range(0,self.s.vcount()):
                 self.s.vs[i]['cost'] = self.get_initial_cost_of_node(i)
-                self.s.vs[i]['contains'] = {i}
+                self.s.vs[i]['contains'] = set([i])
                 self.s.vs[i]['name'] = self.get_name_form(i)
+                self.s.vs[i]['iteration'] = 0
                 self.original_id_to_supernode_name[i] = self.get_name_form(i)
 
     def get_name_form(self,i):
@@ -213,6 +215,8 @@ class Graph_Summary:
         new_index = self.s.vcount() - 1
         new_name = self.get_name_form(self.max_original_id)
         self.s.vs[new_index]['cost'] = cost
+        print u['contains']
+        print v['contains']
         self.s.vs[new_index]['contains'] = u['contains'].union(v['contains'])
         self.s.vs[new_index]['name'] = new_name
         self.max_original_id += 1
@@ -229,75 +233,32 @@ class Graph_Summary:
             self.original_id_to_supernode_name[id] = new_name
 
     def generate_summary(self):
-        #self.annotate_summary()
-        #print self.s.vs[3489]
-        #return
-        unfinished = set(self.s.vs['name'])
-        removed = set()
-        v = self.g.vcount()
-        e = self.g.ecount()
-        cutoff = 0.5#8.0*e/(v*(v-1))
-        self.cutoff = cutoff
-        print cutoff
-        step = 0.01
-        num_skips = 0
-        num_allowable_skips = 10
+        neighbors = {}
+        for n in self.s.vs:
+            n_neighbors = self.g.neighborhood(vertices=n, order=1)
+            n_neighbors_tuple = tuple(sorted(n_neighbors))
+            if not neighbors.has_key(n_neighbors_tuple):
+                neighbors[n_neighbors_tuple] = []
+            neighbors[n_neighbors_tuple].append(n['name'])
 
-        print "Beginning"
-        start = time.time()
-        count = 0
-        while len(unfinished) > 0:
+            n_neighbors = filter(lambda x: n.index != x, n_neighbors)
+            n_neighbors_tuple = tuple(sorted(n_neighbors))
+            if not neighbors.has_key(n_neighbors_tuple):
+                neighbors[n_neighbors_tuple] = []
+            neighbors[n_neighbors_tuple].append(n['name'])
 
-            u = self.pick_random_supernode_in_set(unfinished)
-            two_hop_neighbors = self.get_vertices_with_original_two_hop_connection_exactly(u)
 
-            v_best = None
-            suv_best = 0
-            cost_w_best = None
-            for v in two_hop_neighbors:
-                if v.index != u.index:
-                    suv, cost_w = self.calc_suv(u,v)
-                    if suv > suv_best:
-                        suv_best = suv
-                        v_best = v
-                        cost_w_best = cost_w
-            #print suv_best
-            #import pdb
-            #pdb.set_trace()
-            #print num_skips
-            if suv_best >= cutoff and cutoff>0:
-                if u['name'] in removed:
-                    print "U IN REMOVED"
-                if v_best['name'] in removed:
-                    print "V IN REMOVED"
-
-                #This should not be necessary
-                if u['name'] in unfinished and v_best['name'] in unfinished:
-                    unfinished.remove(u['name'])
-                    unfinished.remove(v_best['name'])
-                else:
-                    continue
-
-                removed.add(u['name'])
-                removed.add(v_best['name'])
-                new_name = self.merge_supernodes(u,v_best,cost_w_best)
-                self.s.vs.find(new_name)['iteration'] = count
-                unfinished.add(new_name)
-            elif suv_best <= 0:
-                u['iteration'] = count
-                unfinished.remove(u['name'])
-            else:
-                num_skips += 1
-                count -= 1
-                if num_skips >= num_allowable_skips:
-                    #print "RESTART"
-                    if cutoff - step > 0:
-                        cutoff -= step
-                    num_skips = 0
-            count += 1
-            if count % 50 == 0:
-                now = time.time()
-                print "%d iterations done, %d seconds elapsed" % (count, (now - start))
+        to_merge = [neighbors[x] for x in filter(lambda l : len(neighbors[l]) > 1, neighbors.keys())]
+        iteration = 0
+        for nodes in to_merge:
+            u = self.s.vs(name = nodes[0])[0]
+            v = None
+            for i in range(1,len(nodes)):
+                v = self.s.vs(name = nodes[i])[0]
+                new_name = self.merge_supernodes(u,v,1)
+                u = self.s.vs(name = new_name)[0]
+                iteration += 1
+            u['iteration'] = iteration
 
         nodes_tried = set()
         for u in self.s.vs:
@@ -307,15 +268,13 @@ class Graph_Summary:
                 if v not in nodes_tried:
                     pi_uv = self.get_potential_number_of_connections_in_original(nodes_in_u,v)
                     A_uv = self.get_number_of_connections_in_original(nodes_in_u,v)
-                    if float(A_uv)/pi_uv > 0.5:# int(math.floor((pi_uv + 1)/2.0)):
+                    if float(A_uv)/pi_uv >= 0.5:# int(math.floor((pi_uv + 1)/2.0)):
                         self.s.add_edge(u,v)
                         self.add_subtractions(u,v)
                     else:
                         self.add_additions(u,v)
             nodes_tried.add(u)
         self.make_drawable()
-        now = time.time()
-        self.runtime = (now - start)
 
     def get_cost(self):
         return self.s.ecount() + len(self.additions) + len(self.subtractions)
@@ -323,7 +282,13 @@ class Graph_Summary:
     def make_drawable(self):
         colors = unique_colors.uniquecolors(self.s.vcount()*2 + 2)
         for n in self.s.vs:
-            n['size'] = 30 + math.log(len(n['contains']),2)*7
+            if self.source_summary is None:
+                n['size'] = 30 + math.log(len(n['contains']),2)*7
+            else:
+                hairsize = 0
+                for c in n['contains']:
+                    hairsize += len(self.g.vs[c]['haircontains']) if self.g.vs[c]['haircontains'] is not None else 0
+                n['size'] = 30 + math.log(len(n['contains'])+hairsize,2)*7
             n['label'] = "%d,%d" % (n['iteration'],len(n['contains']))
             color = colors.pop()
             n['color'] = color
@@ -373,7 +338,6 @@ def visualize(filename, g):
 
 def write_report(filename, g):
     f = open(filename+".txt", "w")
-    f.write("%s - %d" % (dbname, g.runtime))
     f.write("Additions: %d\n" % len(g.additions))
     f.write("Subtractions: %d\n" % len(g.subtractions))
     f.write("Original graph number of vertices: %d\n" % g.g.vcount())
@@ -381,7 +345,6 @@ def write_report(filename, g):
     f.write("Original graph number of edges: %d\n" % g.g.ecount())
     f.write("Summary number of superedges: %d\n" % g.s.ecount())
     f.write("Summary cost: %d\n" % g.get_cost())
-    f.write("Cutoff: %f\n" % g.cutoff)
 
     #f.write(g.original_id_to_supernode
     #f.write(g.s.vs['contains']
@@ -453,12 +416,18 @@ if __name__ == "__main__":
     #g = graph_summary_randomized(False,True,False,False,"out.rdf",False)
     g = Graph_Summary(False,True,False,False,dbname)
     print "First done"
-    #g2 = Graph_Summary(source_summary=g)
 
-    visualize("DBLP50_regular",g)
-    write_report("DBLP50_regular",g)
-    #visualize("DBLP300_testingsecond",g2)
-    #write_report("DBLP300_testingsecond",g2)
+    g2 = Graph_Summary(source_summary=g)
+    g3 = Graph_Summary(source_summary=g2)
+    g4 = Graph_Summary(source_summary=g3)
+    g5 = Graph_Summary(source_summary=g4)
+    g6 = Graph_Summary(source_summary=g5)
+
+    visualize("DBLP50_modules",g)
+    #write_report("DBLP50_modules",g)
+
+    visualize("DBLP50_modulesthird",g3)
+    #write_report("DBLP50_modulessecond",g2)
 
     print g.get_cost()
     """
