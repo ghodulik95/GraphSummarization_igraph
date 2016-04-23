@@ -5,22 +5,43 @@ import time
 import unique_colors
 import math
 
-class Graph_Summary:
-    def __init__(self, directed=None, include_edges=None, include_attributes=None, edges_annotated=None, dbname=None, sql_database = True, wa=1, wc = 1, we = 1, source_summary=None ):
+class Graph_Summary_Random:
+    def __init__(self, directed=None, include_edges=None, include_attributes=None, edges_annotated=None, dbname=None, sql_database = True, cutoff = 0, step=0.1,num_allowable_skips=10, display_req=0.5,display_comp="gr", source_graph=None, original_id_to_node_name=None,source_summary=None ):
+        """
+        :param directed:
+        :param include_edges:
+        :param include_attributes:
+        :param edges_annotated:
+        :param dbname:
+        :param sql_database:
+        :param cutoff:
+        :param display_req:
+        :param display_comp:
+        :type source_graph: ig.Graph
+        :tyoe original_id_to_node_name: Dictionary
+        :return:
+        """
+        self.cutoff = cutoff
+        self.display_req = display_req
+        self.display_comp = display_comp
+        self.step=step
+        self.num_allowable_skips=num_allowable_skips
         if source_summary is None:
             self.source_summary = None
             self.directed = directed
             self.include_edges = include_edges
             self.include_attributes = include_attributes
             self.edges_annotated = edges_annotated
-            self.wa = wa
-            self.wc = wc
-            self.we = we
             self.dbname = dbname
             self.sql_database = sql_database
-            graph_importer = import_graph.Graph_importer(self)
-            self.g, self.original_id_to_name = graph_importer.get_graph_from_RDFDB()
-            del graph_importer
+            if source_graph is None:
+                graph_importer = import_graph.Graph_importer(self)
+                self.g, self.original_id_to_name = graph_importer.get_graph_from_RDFDB()
+                del graph_importer
+
+            else:
+                self.g = source_graph.copy()
+                self.original_id_to_name = original_id_to_node_name.copy()
 
             self.original_id_to_supernode_name = {}
             self.s = self.make_blank_summary()
@@ -33,7 +54,7 @@ class Graph_Summary:
         else:
             self.source_summary = source_summary # type: Graph_Summary
             self.directed = source_summary.directed
-            self.g = Graph_Summary.trim(self.source_summary.s.as_undirected()) # type : ig.Graph
+            self.g = Graph_Summary_Random.trim(self.source_summary.s.as_undirected()) # type : ig.Graph
             self.original_id_to_supernode_name = {}
             self.s = self.make_blank_summary()
             self.additions = {}
@@ -236,18 +257,16 @@ class Graph_Summary:
         removed = set()
         v = self.g.vcount()
         e = self.g.ecount()
-        cutoff = 0.5#8.0*e/(v*(v-1))
-        self.cutoff = cutoff
-        print cutoff
-        step = 0.01
+        cutoff = self.cutoff
+        step = self.step
         num_skips = 0
-        num_allowable_skips = 10
+        num_allowable_skips = self.num_allowable_skips
+        prev_unfinished_size = len(unfinished)
 
-        print "Beginning"
         start = time.time()
         count = 0
         while len(unfinished) > 0:
-
+            prev_unfinished_size = len(unfinished)
             u = self.pick_random_supernode_in_set(unfinished)
             two_hop_neighbors = self.get_vertices_with_original_two_hop_connection_exactly(u)
 
@@ -265,7 +284,7 @@ class Graph_Summary:
             #import pdb
             #pdb.set_trace()
             #print num_skips
-            if suv_best >= cutoff and cutoff>0:
+            if (suv_best >= cutoff and cutoff > 0) or (suv_best > 0 and cutoff <= 0):
                 if u['name'] in removed:
                     print "U IN REMOVED"
                 if v_best['name'] in removed:
@@ -283,7 +302,7 @@ class Graph_Summary:
                 new_name = self.merge_supernodes(u,v_best,cost_w_best)
                 self.s.vs.find(new_name)['iteration'] = count
                 unfinished.add(new_name)
-            elif suv_best <= 0:
+            elif suv_best <= 0 or (suv_best < cutoff and step == 0):
                 u['iteration'] = count
                 unfinished.remove(u['name'])
             else:
@@ -291,15 +310,28 @@ class Graph_Summary:
                 count -= 1
                 if num_skips >= num_allowable_skips:
                     #print "RESTART"
-                    if cutoff - step > 0:
+                    if cutoff - step >= 0:
                         cutoff -= step
+                    else:
+                        cutoff = 0
                     num_skips = 0
             count += 1
             if count % 50 == 0:
                 now = time.time()
-                print "%d iterations done, %d seconds elapsed" % (count, (now - start))
+            if prev_unfinished_size == 1:
+                break
 
+        self.put_edges_on_summary(self.display_req,self.display_comp)
+
+        now = time.time()
+        self.runtime = (now - start)
+        self.make_drawable()
+
+    def put_edges_on_summary(self,req,comp):
         nodes_tried = set()
+        self.additions.clear()
+        self.subtractions.clear()
+        self.s.delete_edges(self.s.es)
         for u in self.s.vs:
             nodes_in_u = u['contains']
             potential_neighbors = self.get_vertices_with_original_n_hop_connection(u,1)
@@ -307,15 +339,12 @@ class Graph_Summary:
                 if v not in nodes_tried:
                     pi_uv = self.get_potential_number_of_connections_in_original(nodes_in_u,v)
                     A_uv = self.get_number_of_connections_in_original(nodes_in_u,v)
-                    if float(A_uv)/pi_uv > 0.5:# int(math.floor((pi_uv + 1)/2.0)):
+                    if (float(A_uv)/pi_uv > req and comp is "gr") or (float(A_uv)/pi_uv >= req and comp is "gre") :
                         self.s.add_edge(u,v)
                         self.add_subtractions(u,v)
                     else:
                         self.add_additions(u,v)
             nodes_tried.add(u)
-        self.make_drawable()
-        now = time.time()
-        self.runtime = (now - start)
 
     def get_cost(self):
         return self.s.ecount() + len(self.additions) + len(self.subtractions)
@@ -373,7 +402,7 @@ def visualize(filename, g):
 
 def write_report(filename, g):
     f = open(filename+".txt", "w")
-    f.write("%s - %d" % (dbname, g.runtime))
+    f.write("%s - %d" % (g.dbname, g.runtime))
     f.write("Additions: %d\n" % len(g.additions))
     f.write("Subtractions: %d\n" % len(g.subtractions))
     f.write("Original graph number of vertices: %d\n" % g.g.vcount())
@@ -451,12 +480,13 @@ def write_report(filename, g):
 if __name__ == "__main__":
     dbname = "DBLP4"
     #g = graph_summary_randomized(False,True,False,False,"out.rdf",False)
-    g = Graph_Summary(False,True,False,False,dbname)
+    g = Graph_Summary_Random(False,True,False,False,dbname,cutoff=0.5,display_comp="gre",display_req=0.5,step=0.01, num_allowable_skips=10)
+
     print "First done"
     #g2 = Graph_Summary(source_summary=g)
 
-    visualize("DBLP50_regular",g)
-    write_report("DBLP50_regular",g)
+    visualize("DBLP50_gre",g)
+    write_report("DBLP50_gre",g)
     #visualize("DBLP300_testingsecond",g2)
     #write_report("DBLP300_testingsecond",g2)
 

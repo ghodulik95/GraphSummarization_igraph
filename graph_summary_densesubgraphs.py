@@ -5,22 +5,44 @@ import time
 import unique_colors
 import math
 
-class Graph_Summary:
-    def __init__(self, directed=None, include_edges=None, include_attributes=None, edges_annotated=None, dbname=None, sql_database = True, wa=1, wc = 1, we = 1, source_summary=None ):
+class Graph_Summary_Dense:
+    def __init__(self, directed=None, include_edges=None, include_attributes=None, edges_annotated=None, dbname=None, sql_database = True, cutoff = 0, display_req=0.5,display_comp="gr", source_graph=None, original_id_to_node_name=None,source_summary=None ):
+        """
+        :param directed:
+        :param include_edges:
+        :param include_attributes:
+        :param edges_annotated:
+        :param dbname:
+        :param sql_database:
+        :param cutoff:
+        :param display_req:
+        :param display_comp:
+        :type source_graph: ig.Graph
+        :tyoe original_id_to_node_name: Dictionary
+        :return:
+        """
+        self.cutoff = cutoff
+        self.display_req = display_req
+        self.display_comp = display_comp
+        self.step=None
+        self.num_allowable_skips=None
         if source_summary is None:
             self.source_summary = None
             self.directed = directed
             self.include_edges = include_edges
             self.include_attributes = include_attributes
             self.edges_annotated = edges_annotated
-            self.wa = wa
-            self.wc = wc
-            self.we = we
             self.dbname = dbname
             self.sql_database = sql_database
-            graph_importer = import_graph.Graph_importer(self)
-            self.g, self.original_id_to_name = graph_importer.get_graph_from_RDFDB()
-            del graph_importer
+            if source_graph is None:
+                graph_importer = import_graph.Graph_importer(self)
+                self.g, self.original_id_to_name = graph_importer.get_graph_from_RDFDB()
+                del graph_importer
+
+                self.original_id_to_supernode_name = {}
+            else:
+                self.g = source_graph.copy()
+                self.original_id_to_name = original_id_to_node_name.copy()
 
             self.original_id_to_supernode_name = {}
             self.s = self.make_blank_summary()
@@ -33,7 +55,7 @@ class Graph_Summary:
         else:
             self.source_summary = source_summary # type: Graph_Summary
             self.directed = source_summary.directed
-            self.g = Graph_Summary.trim(self.source_summary.s.as_undirected()) # type : ig.Graph
+            self.g = Graph_Summary_Dense.trim(self.source_summary.s.as_undirected()) # type : ig.Graph
             self.original_id_to_supernode_name = {}
             self.s = self.make_blank_summary()
             self.additions = {}
@@ -72,7 +94,6 @@ class Graph_Summary:
     def annotate_summary(self):
         if self.s.ecount() == 0:
             for i in range(0,self.s.vcount()):
-                self.s.vs[i]['cost'] = self.get_initial_cost_of_node(i)
                 self.s.vs[i]['contains'] = {i}
                 self.s.vs[i]['name'] = self.get_name_form(i)
                 self.s.vs[i]['iteration'] = i
@@ -107,7 +128,6 @@ class Graph_Summary:
         seed_nodes = super_node['contains']
         original_two_hop_neighbors = set()
         neighborhoods = self.g.neighborhood(vertices=seed_nodes,order=n,mode="all")
-        #print neighborhoods
         for neighborhood in neighborhoods:
             for neighbor in neighborhood:
                 original_two_hop_neighbors.add(neighbor)
@@ -219,7 +239,16 @@ class Graph_Summary:
             unvisited.difference_update(dense_subgraph_nodes)
             visited.update(dense_subgraph_nodes)
 
+        self.put_edges_on_summary(self.display_req,self.display_comp)
+        self.make_drawable()
+        now = time.time()
+        self.runtime = (now - start)
+
+    def put_edges_on_summary(self,req,comp):
         nodes_tried = set()
+        self.additions.clear()
+        self.subtractions.clear()
+        self.s.delete_edges(self.s.es)
         for u in self.s.vs:
             nodes_in_u = u['contains']
             potential_neighbors = self.get_vertices_with_original_n_hop_connection(u,1)
@@ -227,15 +256,12 @@ class Graph_Summary:
                 if v not in nodes_tried:
                     pi_uv = self.get_potential_number_of_connections_in_original(nodes_in_u,v)
                     A_uv = self.get_number_of_connections_in_original(nodes_in_u,v)
-                    if float(A_uv)/pi_uv > 0.5:# int(math.floor((pi_uv + 1)/2.0)):
+                    if (float(A_uv)/pi_uv > req and comp == "gr") or (float(A_uv)/pi_uv >= req and comp == "gre") :
                         self.s.add_edge(u,v)
                         self.add_subtractions(u,v)
                     else:
                         self.add_additions(u,v)
             nodes_tried.add(u)
-        self.make_drawable()
-        now = time.time()
-        self.runtime = (now - start)
 
     def get_cost(self):
         return self.s.ecount() + len(self.additions) + len(self.subtractions)
@@ -371,12 +397,12 @@ def write_report(filename, g):
 if __name__ == "__main__":
     dbname = "DBLP4"
     #g = graph_summary_randomized(False,True,False,False,"out.rdf",False)
-    g = Graph_Summary(False,True,False,False,dbname)
+    g = Graph_Summary_Dense(False,True,False,False,dbname, display_req= 0.5, display_comp="gr")
     print "First done"
     #g2 = Graph_Summary(source_summary=g)
 
-    visualize("DBLP300_dense_subgraphs",g)
-    write_report("DBLP300_dense_subgraphs",g)
+    visualize("DBLP50_dense_subgraphs2",g)
+    write_report("DBLP50_dense_subgraphs2",g)
     #visualize("DBLP300_testingsecond",g2)
     #write_report("DBLP300_testingsecond",g2)
 

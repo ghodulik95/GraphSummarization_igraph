@@ -5,22 +5,30 @@ import time
 import unique_colors
 import math
 
-class Graph_Summary:
-    def __init__(self, directed=None, include_edges=None, include_attributes=None, edges_annotated=None, dbname=None, sql_database = True, wa=1, wc = 1, we = 1, source_summary=None ):
+class Graph_Summary_Module:
+    def __init__(self, directed=None, include_edges=None, include_attributes=None, edges_annotated=None, dbname=None, sql_database = True, source_graph=None,original_id_to_node_name=None, source_summary=None ):
+        self.cutoff = None
+        self.display_req = None
+        self.display_comp = None
+        self.step=None
+        self.num_allowable_skips=None
         if source_summary is None:
             self.source_summary = None
             self.directed = directed
             self.include_edges = include_edges
             self.include_attributes = include_attributes
             self.edges_annotated = edges_annotated
-            self.wa = wa
-            self.wc = wc
-            self.we = we
             self.dbname = dbname
             self.sql_database = sql_database
-            graph_importer = import_graph.Graph_importer(self)
-            self.g, self.original_id_to_name = graph_importer.get_graph_from_RDFDB()
-            del graph_importer
+            if source_graph is None:
+                graph_importer = import_graph.Graph_importer(self)
+                self.g, self.original_id_to_name = graph_importer.get_graph_from_RDFDB()
+                del graph_importer
+
+                self.original_id_to_supernode_name = {}
+            else:
+                self.g = source_graph.copy()
+                self.original_id_to_name = original_id_to_node_name.copy()
 
             self.original_id_to_supernode_name = {}
             self.s = self.make_blank_summary()
@@ -33,7 +41,7 @@ class Graph_Summary:
         else:
             self.source_summary = source_summary # type: Graph_Summary
             self.directed = source_summary.directed
-            self.g = Graph_Summary.trim(self.source_summary.s.as_undirected()) # type : ig.Graph
+            self.g = Graph_Summary_Module.trim(self.source_summary.s.as_undirected()) # type : ig.Graph
             self.original_id_to_supernode_name = {}
             self.s = self.make_blank_summary()
             self.additions = {}
@@ -215,8 +223,6 @@ class Graph_Summary:
         new_index = self.s.vcount() - 1
         new_name = self.get_name_form(self.max_original_id)
         self.s.vs[new_index]['cost'] = cost
-        print u['contains']
-        print v['contains']
         self.s.vs[new_index]['contains'] = u['contains'].union(v['contains'])
         self.s.vs[new_index]['name'] = new_name
         self.max_original_id += 1
@@ -233,6 +239,7 @@ class Graph_Summary:
             self.original_id_to_supernode_name[id] = new_name
 
     def generate_summary(self):
+        start = time.time()
         neighbors = {}
         for n in self.s.vs:
             n_neighbors = self.g.neighborhood(vertices=n, order=1)
@@ -249,8 +256,10 @@ class Graph_Summary:
 
 
         to_merge = [neighbors[x] for x in filter(lambda l : len(neighbors[l]) > 1, neighbors.keys())]
+        already_merged = set()
         iteration = 0
-        for nodes in to_merge:
+        for nodes_to_merge in to_merge:
+            nodes = list(set(nodes_to_merge).difference(already_merged))
             u = self.s.vs(name = nodes[0])[0]
             v = None
             for i in range(1,len(nodes)):
@@ -259,8 +268,18 @@ class Graph_Summary:
                 u = self.s.vs(name = new_name)[0]
                 iteration += 1
             u['iteration'] = iteration
+            already_merged.update(nodes)
 
+        self.put_edges_on_summary()
+        now = time.time()
+        self.runtime = (now - start)
+        self.make_drawable()
+
+    def put_edges_on_summary(self,req=0.5,comp="gr"):
         nodes_tried = set()
+        self.additions.clear()
+        self.subtractions.clear()
+        self.s.delete_edges(self.s.es)
         for u in self.s.vs:
             nodes_in_u = u['contains']
             potential_neighbors = self.get_vertices_with_original_n_hop_connection(u,1)
@@ -268,13 +287,12 @@ class Graph_Summary:
                 if v not in nodes_tried:
                     pi_uv = self.get_potential_number_of_connections_in_original(nodes_in_u,v)
                     A_uv = self.get_number_of_connections_in_original(nodes_in_u,v)
-                    if float(A_uv)/pi_uv >= 0.5:# int(math.floor((pi_uv + 1)/2.0)):
+                    if (float(A_uv)/pi_uv > req and comp == "gr") or (float(A_uv)/pi_uv >= req and comp == "gre") :
                         self.s.add_edge(u,v)
                         self.add_subtractions(u,v)
                     else:
                         self.add_additions(u,v)
             nodes_tried.add(u)
-        self.make_drawable()
 
     def get_cost(self):
         return self.s.ecount() + len(self.additions) + len(self.subtractions)
@@ -415,13 +433,8 @@ if __name__ == "__main__":
     dbname = "DBLP4"
     #g = graph_summary_randomized(False,True,False,False,"out.rdf",False)
     g = Graph_Summary(False,True,False,False,dbname)
-    print "First done"
 
     g2 = Graph_Summary(source_summary=g)
-    g3 = Graph_Summary(source_summary=g2)
-    g4 = Graph_Summary(source_summary=g3)
-    g5 = Graph_Summary(source_summary=g4)
-    g6 = Graph_Summary(source_summary=g5)
 
     visualize("DBLP50_modules",g)
     #write_report("DBLP50_modules",g)
