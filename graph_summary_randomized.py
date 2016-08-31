@@ -4,6 +4,7 @@ import random
 import time
 import unique_colors
 import math
+import numpy.random as numpyrand
 
 class Graph_Summary_Random:
     def __init__(self, directed=None, include_edges=None, include_attributes=None, edges_annotated=None, dbname=None, sql_database = True, cutoff = 0, step=0.1,num_allowable_skips=10, display_req=0.5,display_comp="gr", source_graph=None, original_id_to_node_name=None,source_summary=None ):
@@ -49,6 +50,7 @@ class Graph_Summary_Random:
             self.subtractions = {}
             self.max_original_id = self.g.vcount()
             self.annotate_summary()
+            self.original_id_to_probability = self.generate_probability_array()
             self.generate_summary()
             #self.g = None
         else:
@@ -61,6 +63,7 @@ class Graph_Summary_Random:
             self.subtractions = {}
             self.max_original_id = self.g.vcount()
             self.annotate_summary()
+            self.original_id_to_probability = self.generate_probability_array()
             self.generate_summary()
 
     @staticmethod
@@ -97,6 +100,20 @@ class Graph_Summary_Random:
                 self.s.vs[i]['contains'] = {i}
                 self.s.vs[i]['name'] = self.get_name_form(i)
                 self.original_id_to_supernode_name[i] = self.get_name_form(i)
+
+    def generate_probability_array(self):
+        if self.s.ecount() == 0:
+            prob = {}
+            for i in range(0,self.s.vcount()):
+                p = self.probability_measure(i)
+                prob[i] = p
+            return prob
+
+    def probability_measure(self,i):
+        # Node degree
+        #return self.g.vs[i].degree()
+        #Uniform
+        return 1
 
     def get_name_form(self,i):
         return "Node "+str(i)
@@ -226,7 +243,22 @@ class Graph_Summary_Random:
                 if rand_supernode['name'] in s:
                     return rand_supernode
                 num_attempts += 1"""
-        rand_original_name = random.sample(s,1)[0]
+        slist = list(s)
+        prob_vector = []
+        total = 0
+        for name in slist:
+            prob = 0
+            numContains = 0
+            for id in self.s.vs.find(name)['contains']:
+                #May not be good idea to add .. maybe average, or max?
+                prob = prob + self.original_id_to_probability[id]
+                numContains += 1
+            prob = float(prob)/numContains
+            prob_vector.append(prob)
+            total = prob + total
+        prob_vector = [float(p) / total for p in prob_vector]
+        print prob_vector
+        rand_original_name = numpyrand.choice(slist,p=prob_vector)
         return self.s.vs.find(rand_original_name)
 
     def merge_supernodes(self,u,v,cost):
@@ -341,9 +373,15 @@ class Graph_Summary_Random:
                     A_uv = self.get_number_of_connections_in_original(nodes_in_u,v)
                     if (float(A_uv)/pi_uv > req and comp is "gr") or (float(A_uv)/pi_uv >= req and comp is "gre") :
                         self.s.add_edge(u,v)
+                        eid = self.s.get_eid(u,v)
+                        self.s.es[eid]['subtraction'] = False
                         self.add_subtractions(u,v)
                     else:
                         self.add_additions(u,v)
+                        #Showing additions
+                        self.s.add_edge(u,v)
+                        eid = self.s.get_eid(u,v)
+                        self.s.es[eid]['subtraction'] = True
             nodes_tried.add(u)
 
     def get_cost(self):
@@ -362,8 +400,11 @@ class Graph_Summary_Random:
                 if self.source_summary is None:
                     self.g.vs[c]['size'] = 30
         for e in self.s.es:
-            e['width'] = 5*self.get_support_of_edge_between_supernodes(e.source, e.target)
-            e['label'] = self.get_support_of_edge_between_supernodes(e.source, e.target)
+            if e['subtraction']:
+                e['width'] = 1
+            else:
+                e['width'] = 5*self.get_support_of_edge_between_supernodes(e.source, e.target)
+                e['label'] = self.get_support_of_edge_between_supernodes(e.source, e.target)
 
     def add_subtractions(self,u,v):
         for in_u in u['contains']:
@@ -480,13 +521,13 @@ def write_report(filename, g):
 if __name__ == "__main__":
     dbname = "DBLP4"
     #g = graph_summary_randomized(False,True,False,False,"out.rdf",False)
-    g = Graph_Summary_Random(False,True,False,False,dbname,cutoff=0.5,display_comp="gre",display_req=0.5,step=0.01, num_allowable_skips=10)
+    g = Graph_Summary_Random(False,True,False,False,dbname,cutoff=0.5,display_comp="gr",display_req=0.5,step=0.01, num_allowable_skips=10)
 
     print "First done"
     #g2 = Graph_Summary(source_summary=g)
 
-    visualize("DBLP50_gre",g)
-    write_report("DBLP50_gre",g)
+    visualize("DBLP50_gr_degree_withsub",g)
+    write_report("DBLP50_gr_degree_0withsub",g)
     #visualize("DBLP300_testingsecond",g2)
     #write_report("DBLP300_testingsecond",g2)
 
